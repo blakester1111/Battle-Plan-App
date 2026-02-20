@@ -1,0 +1,28 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dir:*)",
+      "Bash(npm install:*)",
+      "Bash(npm run build:*)",
+      "Bash(find:*)",
+      "Bash(node -e:*)",
+      "Bash(npx prebuild-install:*)",
+      "Bash(tar xzf:*)",
+      "Bash(cd:*)",
+      "Bash(ls:*)",
+      "Bash(npx next dev --help:*)",
+      "Bash(npx next build --help:*)",
+      "Bash(node:*)",
+      "Bash(powershell -ExecutionPolicy Bypass -File:*)",
+      "Bash(npx next build:*)",
+      "Bash(findstr:*)",
+      "WebSearch",
+      "Bash(npm ls:*)",
+      "Bash(npx tsx:*)",
+      "Bash(curl:*)",
+      "Bash(netstat:*)",
+      "Bash(wmic process where \"ProcessId=18120\" get CommandLine:*)",
+      "Bash(tasklist:*)"
+    ]
+  }
+}
