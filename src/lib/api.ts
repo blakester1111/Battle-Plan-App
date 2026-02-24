@@ -539,6 +539,7 @@ export const statsApi = {
   async create(stat: {
     id: string;
     name: string;
+    abbreviation?: string;
     assignedUserId?: string;
     division?: number;
     department?: number;
@@ -560,7 +561,7 @@ export const statsApi = {
     return res.json();
   },
 
-  async update(id: string, updates: { name?: string; division?: number; department?: number; assignedUserId?: string; gds?: boolean; isMoney?: boolean; isPercentage?: boolean; isInverted?: boolean; linkedStatIds?: string[] | null }) {
+  async update(id: string, updates: { name?: string; abbreviation?: string; division?: number; department?: number; assignedUserId?: string; gds?: boolean; isMoney?: boolean; isPercentage?: boolean; isInverted?: boolean; linkedStatIds?: string[] | null }) {
     const res = await fetch(`${API_BASE}/stats`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },

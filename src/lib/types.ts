@@ -180,6 +180,7 @@ export type StatPeriodType = "daily" | "weekly" | "monthly";
 export interface StatDefinition {
   id: string;
   name: string;
+  abbreviation?: string;
   userId: string; // who this stat is assigned to
   createdBy: string; // who created it
   division?: number;

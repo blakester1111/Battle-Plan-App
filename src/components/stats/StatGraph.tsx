@@ -14,7 +14,8 @@ import {
   ResponsiveContainer,
   LabelList,
 } from "recharts";
-import type { StatPeriodType, StatsViewConfig } from "@/lib/types";
+import { getWeekEndingDateForDate, parseDateKey, isSplitBoundaryDay, formatBoundaryHour } from "@/lib/dateUtils";
+import type { StatPeriodType, WeekSettings, StatsViewConfig } from "@/lib/types";
 
 function formatValue(value: number, isMoney: boolean, isPercentage: boolean): string {
   const formatted = value.toLocaleString();
@@ -56,12 +57,16 @@ function getDateRange(config: StatsViewConfig): { start: string; end: string } {
   };
 }
 
-function formatXLabel(date: string, periodType: StatPeriodType): string {
-  const d = new Date(date + "T00:00:00");
+function formatXLabel(date: string, periodType: StatPeriodType, weekSettings?: WeekSettings): string {
+  const { baseDate, isSecondHalf } = parseDateKey(date);
+  const d = new Date(baseDate + "T00:00:00");
   const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
   if (periodType === "daily") {
-    return `${d.getDate()} ${months[d.getMonth()]}`;
+    const label = `${d.getDate()} ${months[d.getMonth()]}`;
+    // For split boundary days, add a subtle marker on the second half
+    if (isSecondHalf) return `${label}'`;
+    return label;
   } else if (periodType === "weekly") {
     return `${d.getDate()} ${months[d.getMonth()]}`;
   } else {
@@ -78,12 +83,23 @@ function shiftDate(dateStr: string, offsetPeriods: number, periodType: StatPerio
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function CustomTooltip({ active, payload, label, isMoney, isPercentage, overlayStatName, overlayIsMoney, overlayIsPercentage, overlayColor, overlayOffset, periodType }: any) {
+function CustomTooltip({ active, payload, label, isMoney, isPercentage, overlayStatName, overlayIsMoney, overlayIsPercentage, overlayColor, overlayOffset, periodType, weekSettings }: any) {
   if (!active || !payload || !payload.length) return null;
 
-  const d = new Date(label + "T00:00:00");
+  const { baseDate, isSecondHalf } = parseDateKey(label);
+  const d = new Date(baseDate + "T00:00:00");
   const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+  // Split-day boundary label
+  let splitLabel = "";
+  if (weekSettings && periodType === "daily") {
+    if (isSecondHalf) {
+      splitLabel = ` (from ${formatBoundaryHour(weekSettings.weekStartHour)})`;
+    } else if (isSplitBoundaryDay(d.getDay(), weekSettings)) {
+      splitLabel = ` (to ${formatBoundaryHour(weekSettings.weekStartHour)})`;
+    }
+  }
 
   // Find primary value (from "value" or "currentValue")
   const primaryEntry = payload.find((p: { dataKey: string }) => p.dataKey === "value" || p.dataKey === "currentValue");
@@ -96,7 +112,7 @@ function CustomTooltip({ active, payload, label, isMoney, isPercentage, overlayS
   // Compute the overlay's original (un-shifted) date when offset ≠ 0
   let overlayOriginalDate = "";
   if (overlayValue != null && overlayOffset && overlayOffset !== 0 && periodType) {
-    const origDateStr = shiftDate(label, overlayOffset, periodType);
+    const origDateStr = shiftDate(baseDate, overlayOffset, periodType);
     const od = new Date(origDateStr + "T00:00:00");
     overlayOriginalDate = `${od.getDate()} ${months[od.getMonth()]} ${od.getFullYear()}`;
   }
@@ -104,7 +120,7 @@ function CustomTooltip({ active, payload, label, isMoney, isPercentage, overlayS
   return (
     <div className="bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 rounded-lg shadow-lg px-3 py-2">
       <p className="text-xs text-stone-500 dark:text-stone-400">
-        {days[d.getDay()]} {d.getDate()} {months[d.getMonth()]} {d.getFullYear()}
+        {days[d.getDay()]} {d.getDate()} {months[d.getMonth()]} {d.getFullYear()}{splitLabel}
       </p>
       <p className="text-sm font-semibold text-stone-800 dark:text-stone-200 mt-0.5">
         {rawValue != null ? formatValue(Number(rawValue), !!isMoney, !!isPercentage) : "—"}
@@ -129,18 +145,28 @@ function CustomTooltip({ active, payload, label, isMoney, isPercentage, overlayS
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function CompositeTooltip({ active, payload, label, linkedStats, isDark }: any) {
+function CompositeTooltip({ active, payload, label, linkedStats, isDark, weekSettings, periodType }: any) {
   if (!active || !payload || !payload.length) return null;
 
-  const d = new Date(label + "T00:00:00");
+  const { baseDate, isSecondHalf } = parseDateKey(label);
+  const d = new Date(baseDate + "T00:00:00");
   const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
   const dashArrays = ["none", "6 3", "2 2"];
 
+  let splitLabel = "";
+  if (weekSettings && periodType === "daily") {
+    if (isSecondHalf) {
+      splitLabel = ` (from ${formatBoundaryHour(weekSettings.weekStartHour)})`;
+    } else if (isSplitBoundaryDay(d.getDay(), weekSettings)) {
+      splitLabel = ` (to ${formatBoundaryHour(weekSettings.weekStartHour)})`;
+    }
+  }
+
   return (
     <div className="bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 rounded-lg shadow-lg px-3 py-2">
       <p className="text-xs text-stone-500 dark:text-stone-400">
-        {days[d.getDay()]} {d.getDate()} {months[d.getMonth()]} {d.getFullYear()}
+        {days[d.getDay()]} {d.getDate()} {months[d.getMonth()]} {d.getFullYear()}{splitLabel}
       </p>
       {(linkedStats || []).map((ls: { id: string; name: string; isMoney?: boolean; isPercentage?: boolean }, i: number) => {
         const entry = payload.find((p: { dataKey: string }) => p.dataKey === `line${i + 1}Value`);
@@ -229,13 +255,20 @@ export default function StatGraph() {
 
   const { start, end } = useMemo(() => getDateRange(config), [config]);
 
+  const weekEndDay = state.weekSettings.weekEndDay;
+  const weekSettings = state.weekSettings;
+
   const { completedData, currentPoint, rangeKey } = useMemo(() => {
     const today = new Date().toISOString().split("T")[0];
+    // Use base date (strip .2 suffix) for range comparison so split-day entries are included
     const filtered = entries.filter(
-      (e) => e.date >= start && e.date <= end && e.periodType === config.periodType
+      (e) => {
+        const base = parseDateKey(e.date).baseDate;
+        return base >= start && base <= end && e.periodType === config.periodType;
+      }
     );
 
-    // Sort by date
+    // Sort by date (the .2 suffix sorts correctly between base date and next day)
     const sorted = [...filtered].sort((a, b) => a.date.localeCompare(b.date));
 
     // Split: current period is the last data point if it matches today (or current week/month)
@@ -244,21 +277,18 @@ export default function StatGraph() {
 
     if (sorted.length > 0) {
       const last = sorted[sorted.length - 1];
-      const lastDate = new Date(last.date + "T00:00:00");
+      const { baseDate: lastBaseDate } = parseDateKey(last.date);
+      const lastDate = new Date(lastBaseDate + "T00:00:00");
       const todayDate = new Date(today + "T00:00:00");
       let isCurrent = false;
 
       if (config.periodType === "daily") {
-        isCurrent = last.date === today;
+        isCurrent = lastBaseDate === today;
       } else if (config.periodType === "weekly") {
-        const getWeekStart = (d: Date) => {
-          const day = d.getDay();
-          const diff = day === 0 ? 6 : day - 1;
-          return new Date(d.getFullYear(), d.getMonth(), d.getDate() - diff);
-        };
-        const lastWeekStart = getWeekStart(lastDate);
-        const todayWeekStart = getWeekStart(todayDate);
-        isCurrent = lastWeekStart.getTime() === todayWeekStart.getTime();
+        // Normalize both dates to their week-ending date, then compare
+        const lastWeekEnd = getWeekEndingDateForDate(lastDate, weekEndDay);
+        const todayWeekEnd = getWeekEndingDateForDate(todayDate, weekEndDay);
+        isCurrent = lastWeekEnd.getTime() === todayWeekEnd.getTime();
       } else {
         isCurrent =
           lastDate.getFullYear() === todayDate.getFullYear() &&
@@ -276,7 +306,7 @@ export default function StatGraph() {
 
     const key = `${start}-${end}-${config.periodType}-${sorted.length}`;
     return { completedData: completed, currentPoint: current, rangeKey: key };
-  }, [entries, start, end, config.periodType]);
+  }, [entries, start, end, config.periodType, weekEndDay]);
 
   // Build chart data: completed entries have "value", current point has "currentValue"
   const chartData = useMemo(() => {
@@ -301,7 +331,7 @@ export default function StatGraph() {
     const filtered = overlayEntries.filter((e) => e.periodType === config.periodType);
     // Shift each date by -offset (positive offset shifts overlay forward visually)
     const shifted = filtered.map((e) => ({
-      date: shiftDate(e.date, -overlayConfig.offsetPeriods, config.periodType),
+      date: shiftDate(parseDateKey(e.date).baseDate, -overlayConfig.offsetPeriods, config.periodType),
       value: e.value,
     }));
     // Filter to visible range
@@ -343,7 +373,10 @@ export default function StatGraph() {
       const ls = linkedStats[i];
       const lsEntries = state.statEntries[ls.id] || [];
       const filtered = lsEntries.filter(
-        (e) => e.date >= start && e.date <= end && e.periodType === config.periodType
+        (e) => {
+          const base = parseDateKey(e.date).baseDate;
+          return base >= start && base <= end && e.periodType === config.periodType;
+        }
       );
       for (const e of filtered) {
         const existing = dateMap.get(e.date) || { date: e.date };
@@ -907,7 +940,7 @@ export default function StatGraph() {
               <CartesianGrid strokeDasharray="3 3" stroke={gridColor} />
               <XAxis
                 dataKey="date"
-                tickFormatter={(d) => formatXLabel(d, config.periodType)}
+                tickFormatter={(d) => formatXLabel(d, config.periodType, weekSettings)}
                 tick={{
                   fontSize: 11,
                   fill: isDark ? "#a8a29e" : "#78716c",
@@ -940,7 +973,7 @@ export default function StatGraph() {
                 axisLine={{ stroke: gridColor, strokeDasharray: "4 3" }}
                 width={line2IsMoney || line2IsPercentage ? 65 : 50}
               />
-              <Tooltip content={<CompositeTooltip linkedStats={linkedStats} isDark={isDark} />} />
+              <Tooltip content={<CompositeTooltip linkedStats={linkedStats} isDark={isDark} weekSettings={weekSettings} periodType={config.periodType} />} />
               {/* Line 1: solid, left axis */}
               <Area
                 yAxisId="left"
@@ -1034,7 +1067,7 @@ export default function StatGraph() {
               <CartesianGrid strokeDasharray="3 3" stroke={gridColor} />
               <XAxis
                 dataKey="date"
-                tickFormatter={(d) => formatXLabel(d, config.periodType)}
+                tickFormatter={(d) => formatXLabel(d, config.periodType, weekSettings)}
                 tick={{
                   fontSize: 11,
                   fill: isDark ? "#a8a29e" : "#78716c",
@@ -1067,7 +1100,7 @@ export default function StatGraph() {
                   width={overlayIsMoney || overlayIsPercentage ? 65 : 50}
                 />
               )}
-              <Tooltip content={<CustomTooltip isMoney={isMoney} isPercentage={isPercentage} overlayStatName={overlayStat?.name} overlayIsMoney={overlayIsMoney} overlayIsPercentage={overlayIsPercentage} overlayColor={overlayLineColor} overlayOffset={overlayConfig?.offsetPeriods} periodType={config.periodType} />} />
+              <Tooltip content={<CustomTooltip isMoney={isMoney} isPercentage={isPercentage} overlayStatName={overlayStat?.name} overlayIsMoney={overlayIsMoney} overlayIsPercentage={overlayIsPercentage} overlayColor={overlayLineColor} overlayOffset={overlayConfig?.offsetPeriods} periodType={config.periodType} weekSettings={weekSettings} />} />
               <Area
                 yAxisId="left"
                 type="linear"

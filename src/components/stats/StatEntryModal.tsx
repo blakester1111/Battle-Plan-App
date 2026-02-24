@@ -4,7 +4,8 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { useAppContext, useAccentColor } from "@/context/AppContext";
 import { statEntriesApi } from "@/lib/api";
 import { generateId } from "@/lib/utils";
-import type { StatPeriodType } from "@/lib/types";
+import { getMostRecentWeekEndingDate, isSplitBoundaryDay, parseDateKey, formatBoundaryHour, SPLIT_HALF_SUFFIX } from "@/lib/dateUtils";
+import type { StatPeriodType, WeekSettings } from "@/lib/types";
 
 interface Props {
   onClose: () => void;
@@ -17,7 +18,7 @@ interface Props {
 type Tab = "enter" | "import";
 
 // Generate dates between start and end for the given period type
-function getDatesBetween(startStr: string, endStr: string, periodType: StatPeriodType): string[] {
+function getDatesBetween(startStr: string, endStr: string, periodType: StatPeriodType, weekEndDay: number, weekSettings: WeekSettings): string[] {
   const dates: string[] = [];
   const start = new Date(startStr + "T00:00:00");
   const end = new Date(endStr + "T00:00:00");
@@ -25,15 +26,18 @@ function getDatesBetween(startStr: string, endStr: string, periodType: StatPerio
   if (periodType === "daily") {
     const d = new Date(end);
     while (d >= start) {
-      dates.push(toDateStr(d));
+      const dateStr = toDateStr(d);
+      if (isSplitBoundaryDay(d.getDay(), weekSettings)) {
+        dates.push(dateStr + SPLIT_HALF_SUFFIX); // second half (from boundary hour)
+        dates.push(dateStr);                      // first half (to boundary hour)
+      } else {
+        dates.push(dateStr);
+      }
       d.setDate(d.getDate() - 1);
     }
   } else if (periodType === "weekly") {
-    // Start from end, snap to Monday, go backwards
-    const d = new Date(end);
-    const day = d.getDay();
-    const diff = day === 0 ? 6 : day - 1;
-    d.setDate(d.getDate() - diff); // snap to Monday
+    // Start from end, snap to the week-ending day, go backwards
+    const d = getMostRecentWeekEndingDate(end, weekEndDay);
     while (d >= start) {
       dates.push(toDateStr(d));
       d.setDate(d.getDate() - 7);
@@ -54,13 +58,21 @@ function toDateStr(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
-function formatDateLabel(date: string, periodType: StatPeriodType): string {
-  const d = new Date(date + "T00:00:00");
+function formatDateLabel(date: string, periodType: StatPeriodType, weekSettings?: WeekSettings): string {
+  const { baseDate, isSecondHalf } = parseDateKey(date);
+  const d = new Date(baseDate + "T00:00:00");
   const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
   if (periodType === "daily") {
-    return `${days[d.getDay()]} ${d.getDate()} ${months[d.getMonth()]} ${d.getFullYear()}`;
+    const label = `${days[d.getDay()]} ${d.getDate()} ${months[d.getMonth()]} ${d.getFullYear()}`;
+    if (isSecondHalf && weekSettings) {
+      return `${label} (from ${formatBoundaryHour(weekSettings.weekStartHour)})`;
+    }
+    if (!isSecondHalf && weekSettings && isSplitBoundaryDay(d.getDay(), weekSettings)) {
+      return `${label} (to ${formatBoundaryHour(weekSettings.weekStartHour)})`;
+    }
+    return label;
   } else if (periodType === "weekly") {
     return `W/E ${d.getDate()} ${months[d.getMonth()]} ${d.getFullYear()}`;
   } else {
@@ -150,6 +162,7 @@ export default function StatEntryModal({ onClose, statId: initialStatId, statNam
   const { state, dispatch } = useAppContext();
   const accent = useAccentColor();
   const config = state.statsViewConfig;
+  const weekEndDay = state.weekSettings.weekEndDay;
   const isCompositeEntry = !!linkedStatIds?.length;
 
   // For composite stats, allow switching between linked stats via tabs
@@ -167,7 +180,8 @@ export default function StatEntryModal({ onClose, statId: initialStatId, statNam
   const [saving, setSaving] = useState<Record<string, boolean>>({});
   const saveTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
 
-  const dates = getDatesBetween(fromDate, toDate, config.periodType);
+  const weekSettings = state.weekSettings;
+  const dates = getDatesBetween(fromDate, toDate, config.periodType, weekEndDay, weekSettings);
 
   // Initialize values from existing entries (re-run when statId changes for composite tab switching)
   useEffect(() => {
@@ -381,18 +395,19 @@ export default function StatEntryModal({ onClose, statId: initialStatId, statNam
             <div className="p-5 overflow-y-auto flex-1">
               <div className="space-y-1.5">
                 {dates.map((date) => {
-                  const isToday = date === today;
+                  const { baseDate } = parseDateKey(date);
+                  const isToday = baseDate === today;
                   return (
                     <div key={date} className="flex items-center gap-3">
                       <span
-                        className={`w-36 text-xs shrink-0 ${
+                        className={`w-44 text-xs shrink-0 ${
                           isToday
                             ? `font-semibold ${accent.text}`
                             : "text-stone-500 dark:text-stone-400"
                         }`}
                       >
-                        {formatDateLabel(date, config.periodType)}
-                        {isToday && " (today)"}
+                        {formatDateLabel(date, config.periodType, weekSettings)}
+                        {isToday && " *"}
                       </span>
                       <div className="relative flex-1">
                         <input

@@ -89,6 +89,7 @@ export async function GET(req: Request) {
       return {
         id: s.id,
         name: s.name,
+        abbreviation: s.abbreviation || undefined,
         userId: s.user_id,
         createdBy: s.created_by,
         division: s.division,
@@ -125,7 +126,7 @@ export async function POST(req: Request) {
   }
 
   const body = await req.json();
-  const { id, name, assignedUserId, division, department, gds, isMoney, isPercentage, isInverted, linkedStatIds } = body;
+  const { id, name, abbreviation, assignedUserId, division, department, gds, isMoney, isPercentage, isInverted, linkedStatIds } = body;
 
   if (!id || !name) {
     return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
@@ -141,6 +142,7 @@ export async function POST(req: Request) {
   const stat = statDefinitionOps.create({
     id,
     name,
+    abbreviation: abbreviation || null,
     user_id: targetUserId,
     created_by: userId,
     division: division ?? null,
@@ -164,6 +166,7 @@ export async function POST(req: Request) {
       ? {
           id: created.id,
           name: created.name,
+          abbreviation: created.abbreviation || undefined,
           userId: created.user_id,
           createdBy: created.created_by,
           division: created.division,
@@ -198,7 +201,7 @@ export async function PUT(req: Request) {
   }
 
   const body = await req.json();
-  const { id, name, division, department, assignedUserId, gds, isMoney, isPercentage, isInverted, linkedStatIds } = body;
+  const { id, name, abbreviation, division, department, assignedUserId, gds, isMoney, isPercentage, isInverted, linkedStatIds } = body;
 
   if (!id) {
     return NextResponse.json({ error: "Missing stat id" }, { status: 400 });
@@ -223,6 +226,7 @@ export async function PUT(req: Request) {
 
   const updates: Record<string, unknown> = {};
   if (name !== undefined) updates.name = name;
+  if (abbreviation !== undefined) updates.abbreviation = abbreviation || null;
   if (division !== undefined) updates.division = division;
   if (department !== undefined) updates.department = department;
   if (assignedUserId !== undefined) updates.user_id = assignedUserId;
@@ -232,7 +236,7 @@ export async function PUT(req: Request) {
   if (isInverted !== undefined) updates.is_inverted = isInverted ? 1 : 0;
   if (linkedStatIds !== undefined) updates.linked_stat_ids = linkedStatIds ? JSON.stringify(linkedStatIds) : null;
 
-  statDefinitionOps.update(id, updates as { name?: string; division?: number; department?: number; user_id?: string; gds?: number; is_money?: number; is_percentage?: number; is_inverted?: number; linked_stat_ids?: string | null });
+  statDefinitionOps.update(id, updates as { name?: string; abbreviation?: string | null; division?: number; department?: number; user_id?: string; gds?: number; is_money?: number; is_percentage?: number; is_inverted?: number; linked_stat_ids?: string | null });
 
   const updated = statDefinitionOps.getById(id);
   let updatedLinkedStatIds: string[] | null = null;
@@ -245,6 +249,7 @@ export async function PUT(req: Request) {
       ? {
           id: updated.id,
           name: updated.name,
+          abbreviation: updated.abbreviation || undefined,
           userId: updated.user_id,
           createdBy: updated.created_by,
           division: updated.division,

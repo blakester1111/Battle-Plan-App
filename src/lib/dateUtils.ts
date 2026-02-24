@@ -115,6 +115,57 @@ export function generateWeeklyBPTitle(settings: WeekSettings, dateFormat: DateFo
   return `W/E ${formatDate(weekEnd, dateFormat)}`;
 }
 
+// Given a date, find the next occurrence of weekEndDay on or after that date.
+// Used to determine which week-ending date a given date belongs to.
+export function getWeekEndingDateForDate(date: Date, weekEndDay: number): Date {
+  const d = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const currentDay = d.getDay();
+  const daysUntilEnd = (weekEndDay - currentDay + 7) % 7;
+  d.setDate(d.getDate() + daysUntilEnd);
+  return d;
+}
+
+// Given a date, find the most recent occurrence of weekEndDay on or before that date.
+// Used when generating week-ending date slots going backwards.
+export function getMostRecentWeekEndingDate(date: Date, weekEndDay: number): Date {
+  const d = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const currentDay = d.getDay();
+  const daysSinceEnd = (currentDay - weekEndDay + 7) % 7;
+  d.setDate(d.getDate() - daysSinceEnd);
+  return d;
+}
+
+// --- Split-day helpers for daily stat entries on week boundary days ---
+
+// Suffix appended to date strings for the second half of a split boundary day
+export const SPLIT_HALF_SUFFIX = ".2";
+
+// Returns true if the given day-of-week is a split boundary day
+// (week starts and ends on the same day with a mid-day boundary hour)
+export function isSplitBoundaryDay(dayOfWeek: number, settings: WeekSettings): boolean {
+  return (
+    settings.weekStartDay === settings.weekEndDay &&
+    settings.weekStartHour > 0 &&
+    dayOfWeek === settings.weekStartDay
+  );
+}
+
+// Parse a date key that may have the .2 suffix
+export function parseDateKey(dateKey: string): { baseDate: string; isSecondHalf: boolean } {
+  if (dateKey.endsWith(SPLIT_HALF_SUFFIX)) {
+    return { baseDate: dateKey.slice(0, -SPLIT_HALF_SUFFIX.length), isSecondHalf: true };
+  }
+  return { baseDate: dateKey, isSecondHalf: false };
+}
+
+// Format boundary hour for display (e.g. 14 -> "2pm", 9 -> "9am")
+export function formatBoundaryHour(hour: number): string {
+  if (hour === 0) return "12am";
+  if (hour < 12) return `${hour}am`;
+  if (hour === 12) return "12pm";
+  return `${hour - 12}pm`;
+}
+
 // Default week settings
 export const DEFAULT_WEEK_SETTINGS: WeekSettings = {
   weekStartDay: 4, // Thursday

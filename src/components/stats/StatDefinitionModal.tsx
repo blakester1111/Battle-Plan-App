@@ -4,26 +4,30 @@ import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { useAppContext, useAccentColor } from "@/context/AppContext";
 import { statsApi, statEntriesApi } from "@/lib/api";
 import { generateId, getDisplayName } from "@/lib/utils";
-import type { StatDefinition, StatPeriodType, User } from "@/lib/types";
+import { getMostRecentWeekEndingDate, isSplitBoundaryDay, parseDateKey, formatBoundaryHour, SPLIT_HALF_SUFFIX } from "@/lib/dateUtils";
+import type { StatDefinition, StatPeriodType, WeekSettings, User } from "@/lib/types";
 
 function toDateStr(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
-function getRecentDates(periodType: StatPeriodType, count: number): string[] {
+function getRecentDates(periodType: StatPeriodType, count: number, weekEndDay: number, weekSettings: WeekSettings): string[] {
   const dates: string[] = [];
   const now = new Date();
   if (periodType === "daily") {
-    for (let i = 0; i < count; i++) {
+    for (let i = 0; dates.length < count; i++) {
       const d = new Date(now);
       d.setDate(d.getDate() - i);
-      dates.push(toDateStr(d));
+      const dateStr = toDateStr(d);
+      if (isSplitBoundaryDay(d.getDay(), weekSettings)) {
+        dates.push(dateStr + SPLIT_HALF_SUFFIX);
+        if (dates.length < count) dates.push(dateStr);
+      } else {
+        dates.push(dateStr);
+      }
     }
   } else if (periodType === "weekly") {
-    const d = new Date(now);
-    const day = d.getDay();
-    const diff = day === 0 ? 6 : day - 1;
-    d.setDate(d.getDate() - diff); // snap to Monday
+    const d = getMostRecentWeekEndingDate(now, weekEndDay);
     for (let i = 0; i < count; i++) {
       dates.push(toDateStr(d));
       d.setDate(d.getDate() - 7);
@@ -38,11 +42,21 @@ function getRecentDates(periodType: StatPeriodType, count: number): string[] {
   return dates;
 }
 
-function formatEntryLabel(date: string, periodType: StatPeriodType): string {
-  const d = new Date(date + "T00:00:00");
+function formatEntryLabel(date: string, periodType: StatPeriodType, weekSettings?: WeekSettings): string {
+  const { baseDate, isSecondHalf } = parseDateKey(date);
+  const d = new Date(baseDate + "T00:00:00");
   const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-  if (periodType === "daily") return `${days[d.getDay()]} ${d.getDate()} ${months[d.getMonth()]}`;
+  if (periodType === "daily") {
+    const label = `${days[d.getDay()]} ${d.getDate()} ${months[d.getMonth()]}`;
+    if (isSecondHalf && weekSettings) {
+      return `${label} (from ${formatBoundaryHour(weekSettings.weekStartHour)})`;
+    }
+    if (!isSecondHalf && weekSettings && isSplitBoundaryDay(d.getDay(), weekSettings)) {
+      return `${label} (to ${formatBoundaryHour(weekSettings.weekStartHour)})`;
+    }
+    return label;
+  }
   if (periodType === "weekly") return `W/E ${d.getDate()} ${months[d.getMonth()]}`;
   return `${months[d.getMonth()]} ${d.getFullYear()}`;
 }
@@ -57,6 +71,7 @@ export default function StatDefinitionModal({ onClose, editingStat }: Props) {
   const accent = useAccentColor();
 
   const [name, setName] = useState(editingStat?.name || "");
+  const [abbreviation, setAbbreviation] = useState(editingStat?.abbreviation || "");
   const [assignedUserId, setAssignedUserId] = useState(editingStat?.userId || state.user?.id || "");
   const [division, setDivision] = useState<string>(editingStat?.division?.toString() || "");
   const [department, setDepartment] = useState<string>(editingStat?.department?.toString() || "");
@@ -79,7 +94,9 @@ export default function StatDefinitionModal({ onClose, editingStat }: Props) {
 
   // Quick data entry state (edit mode only)
   const periodType = state.statsViewConfig.periodType;
-  const recentDates = useMemo(() => editingStat ? getRecentDates(periodType, 8) : [], [editingStat, periodType]);
+  const weekEndDay = state.weekSettings.weekEndDay;
+  const weekSettings = state.weekSettings;
+  const recentDates = useMemo(() => editingStat ? getRecentDates(periodType, 8, weekEndDay, weekSettings) : [], [editingStat, periodType, weekEndDay, weekSettings]);
   const [entryValues, setEntryValues] = useState<Record<string, string>>({});
   const [entrySaving, setEntrySaving] = useState<Record<string, boolean>>({});
   const saveTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
@@ -272,6 +289,7 @@ export default function StatDefinitionModal({ onClose, editingStat }: Props) {
         const { stat } = await statsApi.create({
           id: generateId(),
           name: name.trim(),
+          abbreviation: abbreviation.trim() || undefined,
           assignedUserId: state.user?.id || undefined,
           linkedStatIds: compositeLinkedIds,
         });
@@ -287,6 +305,7 @@ export default function StatDefinitionModal({ onClose, editingStat }: Props) {
         // Normal edit (non-composite or already-composite)
         const { stat } = await statsApi.update(editingStat.id, {
           name: name.trim(),
+          abbreviation: abbreviation.trim() || undefined,
           division: isComposite ? undefined : (division ? Number(division) : undefined),
           department: isComposite ? undefined : (department ? Number(department) : undefined),
           assignedUserId: isComposite ? (state.user?.id || undefined) : (assignedUserId || undefined),
@@ -309,6 +328,7 @@ export default function StatDefinitionModal({ onClose, editingStat }: Props) {
         const { stat } = await statsApi.create({
           id: generateId(),
           name: name.trim(),
+          abbreviation: abbreviation.trim() || undefined,
           assignedUserId: isComposite ? (state.user?.id || undefined) : (assignedUserId || undefined),
           division: isComposite ? undefined : (division ? Number(division) : undefined),
           department: isComposite ? undefined : (department ? Number(department) : undefined),
@@ -363,6 +383,21 @@ export default function StatDefinitionModal({ onClose, editingStat }: Props) {
               placeholder={isComposite ? "e.g. Revenue vs Expenses" : "e.g. Daily Production Output"}
               className={`w-full px-3 py-2 rounded-lg border border-stone-300 dark:border-stone-600 bg-white dark:bg-stone-800 text-stone-800 dark:text-stone-200 text-sm focus:outline-none focus:ring-2 ${accent.ring}`}
               autoFocus
+            />
+          </div>
+
+          {/* Abbreviation */}
+          <div>
+            <label className="block text-sm font-medium text-stone-600 dark:text-stone-400 mb-1">
+              Abbreviation
+            </label>
+            <input
+              type="text"
+              value={abbreviation}
+              onChange={(e) => setAbbreviation(e.target.value)}
+              placeholder="e.g. DPO"
+              maxLength={20}
+              className={`w-full px-3 py-2 rounded-lg border border-stone-300 dark:border-stone-600 bg-white dark:bg-stone-800 text-stone-800 dark:text-stone-200 text-sm focus:outline-none focus:ring-2 ${accent.ring}`}
             />
           </div>
 
@@ -579,17 +614,18 @@ export default function StatDefinitionModal({ onClose, editingStat }: Props) {
               </div>
               <div className="space-y-1.5 rounded-lg border border-stone-200 dark:border-stone-700 p-3 bg-stone-50 dark:bg-stone-800/50">
                 {recentDates.map((date) => {
-                  const isToday = date === today;
+                  const { baseDate } = parseDateKey(date);
+                  const isToday = baseDate === today;
                   return (
                     <div key={date} className="flex items-center gap-2">
                       <span
-                        className={`w-28 text-xs shrink-0 ${
+                        className={`w-36 text-xs shrink-0 ${
                           isToday
                             ? `font-semibold ${accent.text}`
                             : "text-stone-500 dark:text-stone-400"
                         }`}
                       >
-                        {formatEntryLabel(date, periodType)}
+                        {formatEntryLabel(date, periodType, weekSettings)}
                         {isToday && " *"}
                       </span>
                       <div className="relative flex-1">

@@ -238,6 +238,14 @@ function runMigrations(database: DatabaseType) {
     }
   }
 
+  if (!statDefColumns.has("abbreviation")) {
+    try {
+      database.exec("ALTER TABLE stat_definitions ADD COLUMN abbreviation TEXT");
+    } catch {
+      // Column might already exist
+    }
+  }
+
   // Purge items soft-deleted more than 30 days ago
   const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
   database.prepare("DELETE FROM tasks WHERE deleted_at IS NOT NULL AND deleted_at < ?").run(thirtyDaysAgo);
@@ -1420,6 +1428,7 @@ export interface DbBPNoteWithAuthor extends DbBPNote {
 export interface DbStatDefinition {
   id: string;
   name: string;
+  abbreviation: string | null;
   user_id: string;
   created_by: string;
   division: number | null;
@@ -1496,12 +1505,13 @@ export const statDefinitionOps = {
 
   create: (stat: DbStatDefinition) => {
     const stmt = getDb().prepare(`
-      INSERT INTO stat_definitions (id, name, user_id, created_by, division, department, gds, is_money, is_percentage, is_inverted, linked_stat_ids, created_at)
-      VALUES (@id, @name, @user_id, @created_by, @division, @department, @gds, @is_money, @is_percentage, @is_inverted, @linked_stat_ids, @created_at)
+      INSERT INTO stat_definitions (id, name, abbreviation, user_id, created_by, division, department, gds, is_money, is_percentage, is_inverted, linked_stat_ids, created_at)
+      VALUES (@id, @name, @abbreviation, @user_id, @created_by, @division, @department, @gds, @is_money, @is_percentage, @is_inverted, @linked_stat_ids, @created_at)
     `);
     stmt.run({
       id: stat.id,
       name: stat.name,
+      abbreviation: stat.abbreviation ?? null,
       user_id: stat.user_id,
       created_by: stat.created_by,
       division: stat.division ?? null,
@@ -1516,9 +1526,9 @@ export const statDefinitionOps = {
     return stat;
   },
 
-  update: (id: string, updates: Partial<Pick<DbStatDefinition, "name" | "division" | "department" | "user_id" | "gds" | "is_money" | "is_percentage" | "is_inverted" | "linked_stat_ids">>) => {
+  update: (id: string, updates: Partial<Pick<DbStatDefinition, "name" | "abbreviation" | "division" | "department" | "user_id" | "gds" | "is_money" | "is_percentage" | "is_inverted" | "linked_stat_ids">>) => {
     const fields = Object.keys(updates)
-      .filter((k) => ["name", "division", "department", "user_id", "gds", "is_money", "is_percentage", "is_inverted", "linked_stat_ids"].includes(k))
+      .filter((k) => ["name", "abbreviation", "division", "department", "user_id", "gds", "is_money", "is_percentage", "is_inverted", "linked_stat_ids"].includes(k))
       .map((k) => `${k} = @${k}`)
       .join(", ");
     if (!fields) return;
