@@ -478,7 +478,7 @@ export default function PrintBPModal({ onClose, viewMode, bpId }: PrintBPModalPr
 <html>
 <head>
   <meta charset="utf-8">
-  <title>Battle Plan - ${escHtml(displayName)}</title>
+  <title>Admin Basics - ${escHtml(displayName)}</title>
   <style>
     @page {
       margin: 0.6in 0.7in;
@@ -537,7 +537,7 @@ export default function PrintBPModal({ onClose, viewMode, bpId }: PrintBPModalPr
 </head>
 <body>
   <div class="header">
-    <h1>${escHtml(displayName)} &mdash; Battle Plan</h1>
+    <h1>${escHtml(displayName)} &mdash; Admin Basics</h1>
     <div class="date">${escHtml(today)}</div>
     <div class="bp-title">
       ${activeBp ? escHtml(activeBp.title) : ""}
@@ -545,7 +545,7 @@ export default function PrintBPModal({ onClose, viewMode, bpId }: PrintBPModalPr
     </div>
   </div>
   ${bodyContent}
-  <div class="footer">Battle Plan</div>
+  <div class="footer">Admin Basics</div>
 </body>
 </html>`;
   }, [bpTasks, layoutMode, fontSize, showCompleted, activeBp, formula, displayName, state.dateFormat, isMainBoard, bps, bpFormulaMap, visibility, includeLatestBPWriteups, latestBPWriteupsByStep]);
@@ -730,7 +730,7 @@ export default function PrintBPModal({ onClose, viewMode, bpId }: PrintBPModalPr
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           format,
-          title: `${displayName} — Battle Plan`,
+          title: `${displayName} — Admin Basics`,
           date: today,
           bpTitle: activeBp?.title,
           formulaName: formulaLabel,
@@ -752,7 +752,7 @@ export default function PrintBPModal({ onClose, viewMode, bpId }: PrintBPModalPr
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `battle-plan.${format}`;
+      a.download = `admin-basics.${format}`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -797,7 +797,7 @@ export default function PrintBPModal({ onClose, viewMode, bpId }: PrintBPModalPr
               <rect x="6" y="14" width="12" height="8" />
             </svg>
             <h2 className="text-base font-semibold text-stone-800 dark:text-stone-100">
-              Print Battle Plan
+              Print
             </h2>
           </div>
           <button
@@ -939,7 +939,7 @@ export default function PrintBPModal({ onClose, viewMode, bpId }: PrintBPModalPr
             {/* Print Header Preview */}
             <div className="text-center mb-5 pb-4 border-b-2 border-stone-800">
               <h3 className="font-bold text-stone-900" style={{ fontSize: `calc(${previewFontSize} * 1.4)` }}>
-                {displayName} &mdash; Battle Plan
+                {displayName} &mdash; Admin Basics
               </h3>
               <p className="text-stone-500 mt-0.5" style={{ fontSize: `calc(${previewFontSize} * 0.9)` }}>
                 {formatDate(new Date(), state.dateFormat)}

@@ -196,6 +196,48 @@ function runMigrations(database: DatabaseType) {
     }
   }
 
+  // Add gds column to stat_definitions if it doesn't exist
+  const statDefInfo = database.prepare("PRAGMA table_info(stat_definitions)").all() as { name: string }[];
+  const statDefColumns = new Set(statDefInfo.map((col) => col.name));
+  if (!statDefColumns.has("gds")) {
+    try {
+      database.exec("ALTER TABLE stat_definitions ADD COLUMN gds INTEGER DEFAULT 0");
+    } catch {
+      // Column might already exist
+    }
+  }
+
+  // Add is_money, is_percentage, is_inverted columns to stat_definitions
+  if (!statDefColumns.has("is_money")) {
+    try {
+      database.exec("ALTER TABLE stat_definitions ADD COLUMN is_money INTEGER DEFAULT 0");
+    } catch {
+      // Column might already exist
+    }
+  }
+  if (!statDefColumns.has("is_percentage")) {
+    try {
+      database.exec("ALTER TABLE stat_definitions ADD COLUMN is_percentage INTEGER DEFAULT 0");
+    } catch {
+      // Column might already exist
+    }
+  }
+  if (!statDefColumns.has("is_inverted")) {
+    try {
+      database.exec("ALTER TABLE stat_definitions ADD COLUMN is_inverted INTEGER DEFAULT 0");
+    } catch {
+      // Column might already exist
+    }
+  }
+
+  if (!statDefColumns.has("linked_stat_ids")) {
+    try {
+      database.exec("ALTER TABLE stat_definitions ADD COLUMN linked_stat_ids TEXT");
+    } catch {
+      // Column might already exist
+    }
+  }
+
   // Purge items soft-deleted more than 30 days ago
   const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
   database.prepare("DELETE FROM tasks WHERE deleted_at IS NOT NULL AND deleted_at < ?").run(thirtyDaysAgo);
@@ -369,6 +411,37 @@ function getDb(): DatabaseType {
     CREATE INDEX IF NOT EXISTS idx_bp_notes_author ON bp_notes(author_id);
     CREATE INDEX IF NOT EXISTS idx_info_terminal_owner ON info_terminal_relationships(owner_id);
     CREATE INDEX IF NOT EXISTS idx_info_terminal_viewer ON info_terminal_relationships(viewer_id);
+
+    -- Stat definitions (stats to track)
+    CREATE TABLE IF NOT EXISTS stat_definitions (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      created_by TEXT NOT NULL,
+      division INTEGER,
+      department INTEGER,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE CASCADE
+    );
+
+    -- Stat entries (numeric data points)
+    CREATE TABLE IF NOT EXISTS stat_entries (
+      id TEXT PRIMARY KEY,
+      stat_id TEXT NOT NULL,
+      value REAL NOT NULL,
+      date TEXT NOT NULL,
+      period_type TEXT NOT NULL DEFAULT 'daily',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE(stat_id, date, period_type),
+      FOREIGN KEY (stat_id) REFERENCES stat_definitions(id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_stat_definitions_user ON stat_definitions(user_id);
+    CREATE INDEX IF NOT EXISTS idx_stat_definitions_created_by ON stat_definitions(created_by);
+    CREATE INDEX IF NOT EXISTS idx_stat_entries_stat ON stat_entries(stat_id);
+    CREATE INDEX IF NOT EXISTS idx_stat_entries_date ON stat_entries(stat_id, date);
   `);
 
   return db;
@@ -1342,5 +1415,192 @@ export interface DbBPNoteWithAuthor extends DbBPNote {
   author_first_name: string | null;
   author_last_name: string | null;
 }
+
+// Stat definition DB types
+export interface DbStatDefinition {
+  id: string;
+  name: string;
+  user_id: string;
+  created_by: string;
+  division: number | null;
+  department: number | null;
+  gds: number;
+  is_money: number;
+  is_percentage: number;
+  is_inverted: number;
+  linked_stat_ids: string | null;
+  created_at: string;
+}
+
+export interface DbStatDefinitionWithUser extends DbStatDefinition {
+  user_username: string;
+  user_first_name: string | null;
+  user_last_name: string | null;
+  user_division: number | null;
+  user_department: number | null;
+  user_post_title: string | null;
+}
+
+export interface DbStatEntry {
+  id: string;
+  stat_id: string;
+  value: number;
+  date: string;
+  period_type: string;
+  created_at: string;
+  updated_at: string;
+}
+
+// Stat definition operations
+export const statDefinitionOps = {
+  // Get all stats visible to a user (own + created by them + juniors + terminals; admins see all)
+  getForUser: (userId: string, isAdmin: boolean) => {
+    if (isAdmin) {
+      return getDb().prepare(`
+        SELECT sd.*, u.username as user_username, u.first_name as user_first_name, u.last_name as user_last_name, u.division as user_division, u.department as user_department, u.post_title as user_post_title
+        FROM stat_definitions sd
+        JOIN users u ON sd.user_id = u.id
+        ORDER BY sd.name
+      `).all() as DbStatDefinitionWithUser[];
+    }
+    return getDb().prepare(`
+      SELECT sd.*, u.username as user_username, u.first_name as user_first_name, u.last_name as user_last_name, u.division as user_division, u.department as user_department, u.post_title as user_post_title
+      FROM stat_definitions sd
+      JOIN users u ON sd.user_id = u.id
+      WHERE sd.user_id = ?
+        OR sd.created_by = ?
+        OR sd.user_id IN (SELECT junior_id FROM user_relationships WHERE senior_id = ?)
+        OR sd.user_id IN (SELECT owner_id FROM info_terminal_relationships WHERE viewer_id = ?)
+      ORDER BY sd.name
+    `).all(userId, userId, userId, userId) as DbStatDefinitionWithUser[];
+  },
+
+  getByUserId: (userId: string) => {
+    return getDb().prepare(`
+      SELECT sd.*, u.username as user_username, u.first_name as user_first_name, u.last_name as user_last_name, u.division as user_division, u.department as user_department, u.post_title as user_post_title
+      FROM stat_definitions sd
+      JOIN users u ON sd.user_id = u.id
+      WHERE sd.user_id = ?
+      ORDER BY sd.name
+    `).all(userId) as DbStatDefinitionWithUser[];
+  },
+
+  getById: (id: string) => {
+    return getDb().prepare(`
+      SELECT sd.*, u.username as user_username, u.first_name as user_first_name, u.last_name as user_last_name, u.division as user_division, u.department as user_department, u.post_title as user_post_title
+      FROM stat_definitions sd
+      JOIN users u ON sd.user_id = u.id
+      WHERE sd.id = ?
+    `).get(id) as DbStatDefinitionWithUser | undefined;
+  },
+
+  create: (stat: DbStatDefinition) => {
+    const stmt = getDb().prepare(`
+      INSERT INTO stat_definitions (id, name, user_id, created_by, division, department, gds, is_money, is_percentage, is_inverted, linked_stat_ids, created_at)
+      VALUES (@id, @name, @user_id, @created_by, @division, @department, @gds, @is_money, @is_percentage, @is_inverted, @linked_stat_ids, @created_at)
+    `);
+    stmt.run({
+      id: stat.id,
+      name: stat.name,
+      user_id: stat.user_id,
+      created_by: stat.created_by,
+      division: stat.division ?? null,
+      department: stat.department ?? null,
+      gds: stat.gds ?? 0,
+      is_money: stat.is_money ?? 0,
+      is_percentage: stat.is_percentage ?? 0,
+      is_inverted: stat.is_inverted ?? 0,
+      linked_stat_ids: stat.linked_stat_ids ?? null,
+      created_at: stat.created_at,
+    });
+    return stat;
+  },
+
+  update: (id: string, updates: Partial<Pick<DbStatDefinition, "name" | "division" | "department" | "user_id" | "gds" | "is_money" | "is_percentage" | "is_inverted" | "linked_stat_ids">>) => {
+    const fields = Object.keys(updates)
+      .filter((k) => ["name", "division", "department", "user_id", "gds", "is_money", "is_percentage", "is_inverted", "linked_stat_ids"].includes(k))
+      .map((k) => `${k} = @${k}`)
+      .join(", ");
+    if (!fields) return;
+    const stmt = getDb().prepare(`UPDATE stat_definitions SET ${fields} WHERE id = @id`);
+    stmt.run({ id, ...updates });
+  },
+
+  delete: (id: string) => {
+    // Cascade will handle stat_entries
+    getDb().prepare("DELETE FROM stat_definitions WHERE id = ?").run(id);
+  },
+};
+
+// Stat entry operations
+export const statEntryOps = {
+  getByStatId: (statId: string) => {
+    return getDb().prepare(`
+      SELECT * FROM stat_entries WHERE stat_id = ? ORDER BY date ASC
+    `).all(statId) as DbStatEntry[];
+  },
+
+  getByStatIdInRange: (statId: string, startDate: string, endDate: string) => {
+    return getDb().prepare(`
+      SELECT * FROM stat_entries
+      WHERE stat_id = ? AND date >= ? AND date <= ?
+      ORDER BY date ASC
+    `).all(statId, startDate, endDate) as DbStatEntry[];
+  },
+
+  create: (entry: DbStatEntry) => {
+    const stmt = getDb().prepare(`
+      INSERT INTO stat_entries (id, stat_id, value, date, period_type, created_at, updated_at)
+      VALUES (@id, @stat_id, @value, @date, @period_type, @created_at, @updated_at)
+    `);
+    stmt.run(entry);
+    return entry;
+  },
+
+  upsert: (entry: DbStatEntry) => {
+    const stmt = getDb().prepare(`
+      INSERT INTO stat_entries (id, stat_id, value, date, period_type, created_at, updated_at)
+      VALUES (@id, @stat_id, @value, @date, @period_type, @created_at, @updated_at)
+      ON CONFLICT(stat_id, date, period_type)
+      DO UPDATE SET value = @value, updated_at = @updated_at
+    `);
+    stmt.run(entry);
+    return entry;
+  },
+
+  bulkUpsert: (entries: DbStatEntry[]) => {
+    const database = getDb();
+    const stmt = database.prepare(`
+      INSERT INTO stat_entries (id, stat_id, value, date, period_type, created_at, updated_at)
+      VALUES (@id, @stat_id, @value, @date, @period_type, @created_at, @updated_at)
+      ON CONFLICT(stat_id, date, period_type)
+      DO UPDATE SET value = @value, updated_at = @updated_at
+    `);
+    const runAll = database.transaction((items: DbStatEntry[]) => {
+      for (const item of items) {
+        stmt.run(item);
+      }
+    });
+    runAll(entries);
+  },
+
+  update: (id: string, value: number) => {
+    const now = new Date().toISOString();
+    getDb().prepare("UPDATE stat_entries SET value = ?, updated_at = ? WHERE id = ?").run(value, now, id);
+  },
+
+  delete: (id: string) => {
+    getDb().prepare("DELETE FROM stat_entries WHERE id = ?").run(id);
+  },
+
+  getLastNBeforeDate: (statId: string, beforeDate: string, periodType: string, n: number) => {
+    return getDb().prepare(`
+      SELECT * FROM stat_entries
+      WHERE stat_id = ? AND date < ? AND period_type = ?
+      ORDER BY date DESC
+      LIMIT ?
+    `).all(statId, beforeDate, periodType, n) as DbStatEntry[];
+  },
+};
 
 export default getDb;

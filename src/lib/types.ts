@@ -174,6 +174,58 @@ export interface Note {
   updatedAt: string;
 }
 
+// Stats & Graphs types
+export type StatPeriodType = "daily" | "weekly" | "monthly";
+
+export interface StatDefinition {
+  id: string;
+  name: string;
+  userId: string; // who this stat is assigned to
+  createdBy: string; // who created it
+  division?: number;
+  department?: number;
+  gds?: boolean;
+  isMoney?: boolean;
+  isPercentage?: boolean;
+  isInverted?: boolean;
+  linkedStatIds?: string[] | null; // null/undefined = normal stat, 2-3 element array = composite
+  createdAt: string;
+  // Joined fields for display
+  userName?: string;
+  userFirstName?: string;
+  userLastName?: string;
+  userDivision?: number;
+  userDepartment?: number;
+  userPostTitle?: string;
+  // Computed trend fields
+  trend?: "up" | "down" | "flat" | null;
+  downStreak?: number;
+}
+
+export interface StatEntry {
+  id: string;
+  statId: string;
+  value: number;
+  date: string; // YYYY-MM-DD
+  periodType: StatPeriodType;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface StatsViewConfig {
+  periodType: StatPeriodType;
+  rangePreset: string; // e.g. "7d", "14d", "30d", "12w", "custom"
+  customStart?: string;
+  customEnd?: string;
+  yAxisMin?: number;
+  yAxisMax?: number;
+  yAxisAuto: boolean;
+  yAxisRightMin?: number;
+  yAxisRightMax?: number;
+  yAxisRightAuto?: boolean; // defaults to true (via ?? true)
+  showLabels?: boolean;
+}
+
 export interface AppState {
   // Auth
   user: User | null;
@@ -228,6 +280,17 @@ export interface AppState {
   sidebarOrder: SidebarSectionId[];
   // Display preferences
   showStepDescriptions: boolean;
+  // Stats & Graphs
+  viewingStats: boolean;
+  statDefinitions: StatDefinition[];
+  statEntries: Record<string, StatEntry[]>; // keyed by statId
+  selectedStatId: string | null;
+  statsViewConfig: StatsViewConfig;
+  statsSidebarOpen: boolean;
+  statGraphUseAccentColor: boolean;
+  statGraphUpColor: string;
+  statGraphDownColor: string;
+  overlayConfig: { statId: string; offsetPeriods: number } | null;
 }
 
 export type AppAction =
@@ -300,4 +363,20 @@ export type AppAction =
   | { type: "SET_VIEWABLE_AS_INFO_TERMINAL"; payload: User[] }
   | { type: "SET_VIEWING_INFO_TERMINAL"; payload: { user: User | null; tasks: KanbanTask[]; taskNotes: Record<string, TaskNote[]>; bpNotes: Record<string, BPNote[]>; weeklyBPs: WeeklyBattlePlanWithProgress[] } }
   | { type: "ADD_INFO_TERMINAL_TASK_NOTE"; payload: { taskId: string; note: TaskNote } }
-  | { type: "ADD_INFO_TERMINAL_BP_NOTE"; payload: { bpId: string; note: BPNote } };
+  | { type: "ADD_INFO_TERMINAL_BP_NOTE"; payload: { bpId: string; note: BPNote } }
+  // Stats & Graphs
+  | { type: "SET_VIEWING_STATS"; payload: boolean }
+  | { type: "SET_STAT_DEFINITIONS"; payload: StatDefinition[] }
+  | { type: "ADD_STAT_DEFINITION"; payload: StatDefinition }
+  | { type: "UPDATE_STAT_DEFINITION"; payload: StatDefinition }
+  | { type: "DELETE_STAT_DEFINITION"; payload: { id: string } }
+  | { type: "SET_STAT_ENTRIES"; payload: { statId: string; entries: StatEntry[] } }
+  | { type: "ADD_STAT_ENTRY"; payload: StatEntry }
+  | { type: "UPDATE_STAT_ENTRY"; payload: StatEntry }
+  | { type: "DELETE_STAT_ENTRY"; payload: { id: string; statId: string } }
+  | { type: "SET_SELECTED_STAT"; payload: string | null }
+  | { type: "SET_STATS_VIEW_CONFIG"; payload: Partial<StatsViewConfig> }
+  | { type: "TOGGLE_STATS_SIDEBAR" }
+  | { type: "SET_STAT_GRAPH_COLORS"; payload: { useAccent: boolean; upColor: string; downColor: string } }
+  | { type: "SET_OVERLAY_CONFIG"; payload: { statId: string; offsetPeriods: number } | null }
+  | { type: "SET_OVERLAY_OFFSET"; payload: number };

@@ -33,6 +33,9 @@ export default function SettingsModal({ onClose }: Props) {
   });
   const [dateFormat, setDateFormat] = useState<DateFormatType>(state.dateFormat || "dd-MMM-yy");
   const [accentColor, setAccentColor] = useState<AccentColor>(state.accentColor || "amber");
+  const [graphUseAccent, setGraphUseAccent] = useState(state.statGraphUseAccentColor);
+  const [graphUpColor, setGraphUpColor] = useState(state.statGraphUpColor || "");
+  const [graphDownColor, setGraphDownColor] = useState(state.statGraphDownColor || "");
   const backdropRef = useRef<HTMLDivElement>(null);
 
   // Info Terminals state
@@ -127,6 +130,7 @@ export default function SettingsModal({ onClose }: Props) {
     dispatch({ type: "UPDATE_WEEK_SETTINGS", payload: weekSettings });
     dispatch({ type: "SET_DATE_FORMAT", payload: dateFormat });
     dispatch({ type: "SET_ACCENT_COLOR", payload: accentColor });
+    dispatch({ type: "SET_STAT_GRAPH_COLORS", payload: { useAccent: graphUseAccent, upColor: graphUpColor, downColor: graphDownColor } });
     onClose();
   }
 
@@ -313,6 +317,97 @@ export default function SettingsModal({ onClose }: Props) {
                 )
               )}
             </div>
+          </div>
+
+          {/* Graph Line Colors */}
+          <div className="border-t border-stone-100 dark:border-stone-800/60 pt-4">
+            <h3 className="text-[11px] font-semibold uppercase tracking-widest text-stone-400 dark:text-stone-500 mb-3">
+              Graph Line Colors
+            </h3>
+
+            {/* Use accent color checkbox */}
+            <label className="flex items-center justify-between gap-3 cursor-pointer mb-3">
+              <div>
+                <span className="text-sm text-stone-600 dark:text-stone-300">
+                  Use accent color for graph lines
+                </span>
+                <p className="text-xs text-stone-400 dark:text-stone-500 mt-0.5">
+                  Lines use your theme color with shading underneath
+                </p>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={graphUseAccent}
+                onClick={() => setGraphUseAccent(!graphUseAccent)}
+                className={cn(
+                  "relative shrink-0 w-9 h-5 rounded-full transition-colors",
+                  graphUseAccent
+                    ? "bg-stone-800 dark:bg-stone-200"
+                    : "bg-stone-300 dark:bg-stone-600"
+                )}
+              >
+                <span
+                  className={cn(
+                    "absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white dark:bg-stone-900 transition-transform shadow-sm",
+                    graphUseAccent && "translate-x-4"
+                  )}
+                />
+              </button>
+            </label>
+
+            {/* Custom up/down color pickers — only shown when accent mode is off */}
+            {!graphUseAccent && (
+              <>
+                <p className="text-xs text-stone-500 dark:text-stone-400 mb-3">
+                  The &quot;up&quot; color is used when trending up or even, and &quot;down&quot; when trending down. No shading is shown in this mode.
+                </p>
+
+                <div className="space-y-2">
+                  <div className="flex items-center gap-3">
+                    <label className="text-sm text-stone-600 dark:text-stone-300 w-20">
+                      Up / Even
+                    </label>
+                    <div className="flex items-center gap-2 flex-1">
+                      <input
+                        type="color"
+                        value={graphUpColor || "#1c1917"}
+                        onChange={(e) => setGraphUpColor(e.target.value)}
+                        className="w-8 h-8 rounded border border-stone-200 dark:border-stone-700 cursor-pointer bg-transparent"
+                      />
+                      <span className="text-xs text-stone-400 dark:text-stone-500">
+                        {graphUpColor || "Auto (black / white)"}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-3">
+                    <label className="text-sm text-stone-600 dark:text-stone-300 w-20">
+                      Down
+                    </label>
+                    <div className="flex items-center gap-2 flex-1">
+                      <input
+                        type="color"
+                        value={graphDownColor || "#ef4444"}
+                        onChange={(e) => setGraphDownColor(e.target.value)}
+                        className="w-8 h-8 rounded border border-stone-200 dark:border-stone-700 cursor-pointer bg-transparent"
+                      />
+                      <span className="text-xs text-stone-400 dark:text-stone-500">
+                        {graphDownColor || "Auto (red)"}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => { setGraphUpColor(""); setGraphDownColor(""); }}
+                  className="mt-3 text-xs text-stone-400 dark:text-stone-500 hover:text-stone-600 dark:hover:text-stone-300 transition-colors"
+                >
+                  Reset to defaults
+                </button>
+              </>
+            )}
           </div>
 
           {/* Week Schedule Settings */}

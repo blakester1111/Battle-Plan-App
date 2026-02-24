@@ -35,7 +35,7 @@ export default function LoginForm() {
     <div className="min-h-screen flex items-center justify-center bg-stone-950 px-4">
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
-          <h1 className="font-display text-4xl text-stone-100">Battle Plan</h1>
+          <h1 className="font-display text-4xl text-stone-100">Admin Basics</h1>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">

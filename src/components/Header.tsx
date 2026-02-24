@@ -50,7 +50,9 @@ export default function Header() {
       <header className="header-border h-14 flex items-center justify-between px-5 bg-white dark:bg-stone-950 z-10">
         <div className="flex items-center gap-3">
           <button
-            onClick={() => dispatch({ type: "TOGGLE_SIDEBAR" })}
+            onClick={() =>
+              dispatch({ type: state.viewingStats ? "TOGGLE_STATS_SIDEBAR" : "TOGGLE_SIDEBAR" })
+            }
             className="p-1.5 rounded text-stone-400 hover:text-stone-600 dark:text-stone-500 dark:hover:text-stone-300 transition-colors"
             aria-label="Toggle sidebar"
           >
@@ -70,34 +72,92 @@ export default function Header() {
             </svg>
           </button>
           <h1 className="text-xl font-semibold tracking-tight text-stone-800 dark:text-stone-200">
-            Battle Plan
+            {state.viewingStats ? "Stats & Graphs" : "Battle Plan"}
           </h1>
+          <button
+            onClick={() => {
+              const entering = !state.viewingStats;
+              dispatch({ type: "SET_VIEWING_STATS", payload: entering });
+              if (entering) {
+                // Clear other viewing modes
+                if (state.viewingJunior) {
+                  dispatch({ type: "SET_VIEWING_JUNIOR", payload: { junior: null, tasks: [], notes: {} } });
+                }
+                if (state.viewingInfoTerminal) {
+                  dispatch({ type: "SET_VIEWING_INFO_TERMINAL", payload: { user: null, tasks: [], taskNotes: {}, bpNotes: {}, weeklyBPs: [] } });
+                }
+              }
+            }}
+            className={`p-1.5 rounded-md transition-colors ${
+              state.viewingStats
+                ? `${accent.bgSubtle} ${accent.text}`
+                : "text-stone-400 hover:text-stone-600 dark:text-stone-500 dark:hover:text-stone-300"
+            }`}
+            aria-label={state.viewingStats ? "Back to Battle Plan" : "Stats & Graphs"}
+            title={state.viewingStats ? "Back to Battle Plan" : "Stats & Graphs"}
+          >
+            {state.viewingStats ? (
+              /* Checklist / task-page icon — go back to BP */
+              <svg
+                width="18"
+                height="18"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M9 11l3 3L22 4" />
+                <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
+              </svg>
+            ) : (
+              /* Chart icon — go to Stats & Graphs */
+              <svg
+                width="18"
+                height="18"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M3 3v18h18" />
+                <path d="M7 16l4-8 4 4 5-6" />
+              </svg>
+            )}
+          </button>
         </div>
         <div className="flex items-center gap-2">
-          {/* Search button */}
-          <button
-            onClick={() => setShowSearch(true)}
-            className="p-1.5 rounded text-stone-400 hover:text-stone-600 dark:text-stone-500 dark:hover:text-stone-300 transition-colors"
-            aria-label="Search targets"
-            title="Search Targets"
-          >
-            <svg
-              width="18"
-              height="18"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <circle cx="11" cy="11" r="8" />
-              <line x1="21" y1="21" x2="16.65" y2="16.65" />
-            </svg>
-          </button>
-          <SortModeSelector />
-          <div className="h-5 w-px bg-stone-200 dark:bg-stone-700" />
-          <CategoryFilter />
+          {!state.viewingStats && (
+            <>
+              {/* Search button */}
+              <button
+                onClick={() => setShowSearch(true)}
+                className="p-1.5 rounded text-stone-400 hover:text-stone-600 dark:text-stone-500 dark:hover:text-stone-300 transition-colors"
+                aria-label="Search targets"
+                title="Search Targets"
+              >
+                <svg
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <circle cx="11" cy="11" r="8" />
+                  <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                </svg>
+              </button>
+              <SortModeSelector />
+              <div className="h-5 w-px bg-stone-200 dark:bg-stone-700" />
+              <CategoryFilter />
+            </>
+          )}
           {/* Tray toggle chevron */}
           <button
             onClick={() => setTrayOpen((v) => !v)}
@@ -152,7 +212,7 @@ export default function Header() {
                 onClick={() => setShowPrint(true)}
                 className="p-1.5 rounded text-stone-400 hover:text-stone-600 dark:text-stone-500 dark:hover:text-stone-300 transition-colors shrink-0"
                 aria-label="Print"
-                title="Print Battle Plan"
+                title="Print"
               >
                 <svg
                   width="18"

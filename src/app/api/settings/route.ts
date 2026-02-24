@@ -33,6 +33,12 @@ export async function GET(request: NextRequest) {
       weekSettings: allSettings.weekSettings ?? null,
       dateFormat: allSettings.dateFormat ?? null,
       sidebarOrder: allSettings.sidebarOrder ?? null,
+      accentColor: allSettings.accentColor ?? null,
+      showStepDescriptions: allSettings.showStepDescriptions ?? null,
+      viewingStats: allSettings.viewingStats ?? null,
+      selectedStatId: allSettings.selectedStatId ?? null,
+      statsSidebarOpen: allSettings.statsSidebarOpen ?? null,
+      statGraphColors: allSettings.statGraphColors ?? null,
     });
   } catch (error) {
     console.error("Error fetching settings:", error);

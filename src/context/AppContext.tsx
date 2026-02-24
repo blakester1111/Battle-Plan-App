@@ -8,11 +8,11 @@ import {
   useRef,
   type ReactNode,
 } from "react";
-import type { AppState, AppAction, KanbanTask, PriorityShortcuts, User, TaskNote, BPNote, WeeklyBattlePlanWithProgress, BoardSortMode, WeekSettings, DateFormatType, SidebarSectionId, AccentColor, RecurrenceRule } from "@/lib/types";
+import type { AppState, AppAction, KanbanTask, PriorityShortcuts, User, TaskNote, BPNote, WeeklyBattlePlanWithProgress, BoardSortMode, WeekSettings, DateFormatType, SidebarSectionId, AccentColor, RecurrenceRule, StatDefinition, StatEntry, StatsViewConfig } from "@/lib/types";
 import { DEFAULT_PRIORITY_SHORTCUTS, DEFAULT_SIDEBAR_ORDER } from "@/lib/types";
 import { DEFAULT_WEEK_SETTINGS } from "@/lib/dateUtils";
 import { generateId, reassignOrder, getAccentClasses, type AccentColorConfig } from "@/lib/utils";
-import { tasksApi, notesApi, settingsApi, categoriesApi, authApi, relationshipsApi, taskNotesApi, bpNotesApi, weeklyBPApi } from "@/lib/api";
+import { tasksApi, notesApi, settingsApi, categoriesApi, authApi, relationshipsApi, taskNotesApi, bpNotesApi, weeklyBPApi, statsApi } from "@/lib/api";
 
 const initialState: AppState = {
   user: null,
@@ -53,6 +53,21 @@ const initialState: AppState = {
   accentColor: "amber" as AccentColor,
   sidebarOrder: DEFAULT_SIDEBAR_ORDER,
   showStepDescriptions: true,
+  viewingStats: false,
+  statDefinitions: [],
+  statEntries: {},
+  selectedStatId: null,
+  statsViewConfig: {
+    periodType: "daily",
+    rangePreset: "30d",
+    yAxisAuto: true,
+    yAxisRightAuto: true,
+  },
+  statsSidebarOpen: true,
+  statGraphUseAccentColor: false,
+  statGraphUpColor: "",
+  statGraphDownColor: "",
+  overlayConfig: null,
 };
 
 function appReducer(state: AppState, action: AppAction): AppState {
@@ -339,6 +354,8 @@ function appReducer(state: AppState, action: AppAction): AppState {
         viewingJunior: action.payload.junior,
         juniorTasks: action.payload.tasks,
         juniorTaskNotes: action.payload.notes,
+        // Clear stats view when switching to junior board
+        ...(action.payload.junior ? { viewingStats: false } : {}),
       };
     }
 
@@ -597,6 +614,8 @@ function appReducer(state: AppState, action: AppAction): AppState {
         infoTerminalTaskNotes: action.payload.taskNotes,
         infoTerminalBPNotes: action.payload.bpNotes,
         infoTerminalWeeklyBPs: action.payload.weeklyBPs,
+        // Clear stats view when switching to info terminal board
+        ...(action.payload.user ? { viewingStats: false } : {}),
       };
     }
 
@@ -624,6 +643,144 @@ function appReducer(state: AppState, action: AppAction): AppState {
       };
     }
 
+    // ---- Stats & Graphs ----
+    case "SET_VIEWING_STATS": {
+      return {
+        ...state,
+        viewingStats: action.payload,
+        _pendingSetting: { key: "viewingStats", value: action.payload },
+      } as AppState & { _pendingSetting: { key: string; value: unknown } };
+    }
+
+    case "SET_STAT_DEFINITIONS": {
+      return { ...state, statDefinitions: action.payload };
+    }
+
+    case "ADD_STAT_DEFINITION": {
+      return { ...state, statDefinitions: [...state.statDefinitions, action.payload] };
+    }
+
+    case "UPDATE_STAT_DEFINITION": {
+      return {
+        ...state,
+        statDefinitions: state.statDefinitions.map((sd) =>
+          sd.id === action.payload.id ? action.payload : sd
+        ),
+      };
+    }
+
+    case "DELETE_STAT_DEFINITION": {
+      const { id } = action.payload;
+      const newEntries = { ...state.statEntries };
+      delete newEntries[id];
+      return {
+        ...state,
+        statDefinitions: state.statDefinitions.filter((sd) => sd.id !== id),
+        statEntries: newEntries,
+        selectedStatId: state.selectedStatId === id ? null : state.selectedStatId,
+        overlayConfig: state.overlayConfig?.statId === id ? null : state.overlayConfig,
+      };
+    }
+
+    case "SET_STAT_ENTRIES": {
+      return {
+        ...state,
+        statEntries: {
+          ...state.statEntries,
+          [action.payload.statId]: action.payload.entries,
+        },
+      };
+    }
+
+    case "ADD_STAT_ENTRY": {
+      const entry = action.payload;
+      const existing = state.statEntries[entry.statId] || [];
+      // Replace if same date+periodType, otherwise add
+      const idx = existing.findIndex((e) => e.date === entry.date && e.periodType === entry.periodType);
+      let updated;
+      if (idx >= 0) {
+        updated = [...existing];
+        updated[idx] = entry;
+      } else {
+        updated = [...existing, entry].sort((a, b) => a.date.localeCompare(b.date));
+      }
+      return {
+        ...state,
+        statEntries: { ...state.statEntries, [entry.statId]: updated },
+      };
+    }
+
+    case "UPDATE_STAT_ENTRY": {
+      const entry = action.payload;
+      const entries = state.statEntries[entry.statId] || [];
+      return {
+        ...state,
+        statEntries: {
+          ...state.statEntries,
+          [entry.statId]: entries.map((e) => (e.id === entry.id ? entry : e)),
+        },
+      };
+    }
+
+    case "DELETE_STAT_ENTRY": {
+      const { id: entryId, statId } = action.payload;
+      const entries = state.statEntries[statId] || [];
+      return {
+        ...state,
+        statEntries: {
+          ...state.statEntries,
+          [statId]: entries.filter((e) => e.id !== entryId),
+        },
+      };
+    }
+
+    case "SET_SELECTED_STAT": {
+      return {
+        ...state,
+        selectedStatId: action.payload,
+        overlayConfig: null,
+        _pendingSetting: { key: "selectedStatId", value: action.payload },
+      } as AppState & { _pendingSetting: { key: string; value: unknown } };
+    }
+
+    case "SET_STATS_VIEW_CONFIG": {
+      return {
+        ...state,
+        statsViewConfig: { ...state.statsViewConfig, ...action.payload },
+      };
+    }
+
+    case "TOGGLE_STATS_SIDEBAR": {
+      const newValue = !state.statsSidebarOpen;
+      return {
+        ...state,
+        statsSidebarOpen: newValue,
+        _pendingSetting: { key: "statsSidebarOpen", value: newValue },
+      } as AppState & { _pendingSetting: { key: string; value: unknown } };
+    }
+
+    case "SET_STAT_GRAPH_COLORS": {
+      return {
+        ...state,
+        statGraphUseAccentColor: action.payload.useAccent,
+        statGraphUpColor: action.payload.upColor,
+        statGraphDownColor: action.payload.downColor,
+        _pendingSetting: { key: "statGraphColors", value: action.payload },
+      } as AppState & { _pendingSetting: { key: string; value: unknown } };
+    }
+
+    case "SET_OVERLAY_CONFIG": {
+      return { ...state, overlayConfig: action.payload };
+    }
+
+    case "SET_OVERLAY_OFFSET": {
+      if (!state.overlayConfig) return state;
+      return {
+        ...state,
+        overlayConfig: { ...state.overlayConfig, offsetPeriods: action.payload },
+      };
+    }
+
     default:
       return state;
   }
@@ -641,6 +798,7 @@ const AppContext = createContext<{
   refreshWeeklyBPs: () => Promise<void>;
   refreshTasks: () => Promise<void>;
   refreshInfoTerminals: () => Promise<void>;
+  refreshStats: () => Promise<void>;
 } | null>(null);
 
 export function AppProvider({ children }: { children: ReactNode }) {
@@ -653,12 +811,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
     async function checkAuth() {
       try {
         const { user } = await authApi.getCurrentUser();
-        dispatch({ type: "SET_USER", payload: user });
 
-        // If user is logged in, load their data
+        // Load user data (HYDRATE) BEFORE setting user — this ensures
+        // viewingStats and other persisted settings are already in state
+        // when isAuthLoading becomes false, preventing a flash of BP view
         if (user) {
           await loadUserData();
         }
+        dispatch({ type: "SET_USER", payload: user });
       } catch (error) {
         console.error("Error checking auth:", error);
         dispatch({ type: "SET_USER", payload: null });
@@ -671,7 +831,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // Load user data from API
   async function loadUserData() {
     try {
-      const [tasks, notes, settings, customCategories, juniorsData, myNotesData, myBPNotesData, weeklyBPsData, myInfoTerminals, viewableInfoTerminals] = await Promise.all([
+      const [tasks, notes, settings, customCategories, juniorsData, myNotesData, myBPNotesData, weeklyBPsData, myInfoTerminals, viewableInfoTerminals, statsData] = await Promise.all([
         tasksApi.getAll(),
         notesApi.getAll(),
         settingsApi.getAll(),
@@ -682,6 +842,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         weeklyBPApi.getAll().catch(() => ({ weeklyBattlePlans: [] })),
         fetch("/api/info-terminals/my-viewers").then(r => r.json()).catch(() => ({ viewers: [] })),
         fetch("/api/info-terminals/viewable").then(r => r.json()).catch(() => ({ boards: [] })),
+        statsApi.getAll().catch(() => ({ stats: [] })),
       ]);
 
       dispatch({
@@ -726,6 +887,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
           sidebarOrder: (settings?.sidebarOrder as SidebarSectionId[]) || DEFAULT_SIDEBAR_ORDER,
           formulaStepFilter: [],
           showStepDescriptions: settings?.showStepDescriptions ?? true,
+          viewingStats: settings?.viewingStats ?? false,
+          statDefinitions: statsData?.stats || [],
+          statEntries: {},
+          selectedStatId: (settings?.selectedStatId as string) || null,
+          statsViewConfig: {
+            periodType: "daily",
+            rangePreset: "30d",
+            yAxisAuto: true,
+            yAxisRightAuto: true,
+          },
+          statsSidebarOpen: settings?.statsSidebarOpen ?? true,
+          statGraphUseAccentColor: (settings?.statGraphColors as { useAccent?: boolean })?.useAccent ?? false,
+          statGraphUpColor: (settings?.statGraphColors as { upColor?: string })?.upColor || "",
+          statGraphDownColor: (settings?.statGraphColors as { downColor?: string })?.downColor || "",
+          overlayConfig: null,
         },
       });
 
@@ -741,8 +917,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // Login function
   async function login(username: string, password: string) {
     const { user } = await authApi.login(username, password);
-    dispatch({ type: "SET_USER", payload: user });
     await loadUserData();
+    dispatch({ type: "SET_USER", payload: user });
   }
 
   // Register function
@@ -797,6 +973,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
         accentColor: "amber",
         sidebarOrder: DEFAULT_SIDEBAR_ORDER,
         showStepDescriptions: true,
+        viewingStats: false,
+        statDefinitions: [],
+        statEntries: {},
+        selectedStatId: null,
+        statsViewConfig: {
+          periodType: "daily",
+          rangePreset: "30d",
+          yAxisAuto: true,
+          yAxisRightAuto: true,
+        },
+        statsSidebarOpen: true,
+        statGraphUseAccentColor: false,
+        statGraphUpColor: "",
+        statGraphDownColor: "",
+        overlayConfig: null,
       },
     });
     hydrated.current = false;
@@ -881,6 +1072,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
       dispatch({ type: "SET_VIEWABLE_AS_INFO_TERMINAL", payload: viewableBoards?.boards || [] });
     } catch (error) {
       console.error("Failed to refresh info terminals:", error);
+    }
+  }
+
+  // Refresh stats definitions from server
+  async function refreshStats() {
+    try {
+      const statsData = await statsApi.getAll();
+      dispatch({ type: "SET_STAT_DEFINITIONS", payload: statsData?.stats || [] });
+    } catch (error) {
+      console.error("Failed to refresh stats:", error);
     }
   }
 
@@ -982,7 +1183,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [state]);
 
   return (
-    <AppContext.Provider value={{ state, dispatch, login, register, logout, refreshJuniors, refreshMyNotes, refreshMyBPNotes, refreshWeeklyBPs, refreshTasks, refreshInfoTerminals }}>
+    <AppContext.Provider value={{ state, dispatch, login, register, logout, refreshJuniors, refreshMyNotes, refreshMyBPNotes, refreshWeeklyBPs, refreshTasks, refreshInfoTerminals, refreshStats }}>
       {children}
     </AppContext.Provider>
   );

@@ -130,3 +130,8 @@ input[type="radio"] {
 .dark .header-border::after {
   background: linear-gradient(90deg, transparent, #44403c 20%, #44403c 80%, transparent);
 }
+
+/* Recharts tooltip override for dark mode consistency */
+.recharts-default-tooltip {
+  border-radius: 8px !important;
+}

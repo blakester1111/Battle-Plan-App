@@ -525,6 +525,122 @@ export const trashApi = {
   },
 };
 
+// Stats API
+export const statsApi = {
+  async getAll(periodType?: string) {
+    const url = periodType
+      ? `${API_BASE}/stats?periodType=${encodeURIComponent(periodType)}`
+      : `${API_BASE}/stats`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error("Failed to fetch stats");
+    return res.json();
+  },
+
+  async create(stat: {
+    id: string;
+    name: string;
+    assignedUserId?: string;
+    division?: number;
+    department?: number;
+    gds?: boolean;
+    isMoney?: boolean;
+    isPercentage?: boolean;
+    isInverted?: boolean;
+    linkedStatIds?: string[];
+  }) {
+    const res = await fetch(`${API_BASE}/stats`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(stat),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({ error: "Failed to create stat" }));
+      throw new Error(data.error || "Failed to create stat");
+    }
+    return res.json();
+  },
+
+  async update(id: string, updates: { name?: string; division?: number; department?: number; assignedUserId?: string; gds?: boolean; isMoney?: boolean; isPercentage?: boolean; isInverted?: boolean; linkedStatIds?: string[] | null }) {
+    const res = await fetch(`${API_BASE}/stats`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id, ...updates }),
+    });
+    if (!res.ok) throw new Error("Failed to update stat");
+    return res.json();
+  },
+
+  async delete(id: string) {
+    const res = await fetch(`${API_BASE}/stats?id=${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    });
+    if (!res.ok) throw new Error("Failed to delete stat");
+    return res.json();
+  },
+};
+
+// Stat Entries API
+export const statEntriesApi = {
+  async getByStatId(statId: string, startDate?: string, endDate?: string) {
+    let url = `${API_BASE}/stat-entries?statId=${encodeURIComponent(statId)}`;
+    if (startDate) url += `&startDate=${encodeURIComponent(startDate)}`;
+    if (endDate) url += `&endDate=${encodeURIComponent(endDate)}`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error("Failed to fetch stat entries");
+    return res.json();
+  },
+
+  async upsert(entry: {
+    id: string;
+    statId: string;
+    value: number;
+    date: string;
+    periodType: string;
+  }) {
+    const res = await fetch(`${API_BASE}/stat-entries`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(entry),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({ error: "Failed to save entry" }));
+      throw new Error(data.error || "Failed to save entry");
+    }
+    return res.json();
+  },
+
+  async bulkImport(statId: string, entries: { date: string; value: number; periodType: string }[]) {
+    const res = await fetch(`${API_BASE}/stat-entries`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ statId, entries }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({ error: "Failed to import entries" }));
+      throw new Error(data.error || "Failed to import entries");
+    }
+    return res.json();
+  },
+
+  async update(id: string, value: number) {
+    const res = await fetch(`${API_BASE}/stat-entries`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id, value }),
+    });
+    if (!res.ok) throw new Error("Failed to update entry");
+    return res.json();
+  },
+
+  async delete(id: string) {
+    const res = await fetch(`${API_BASE}/stat-entries?id=${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    });
+    if (!res.ok) throw new Error("Failed to delete entry");
+    return res.json();
+  },
+};
+
 // Archive API
 export const archiveApi = {
   async getAll() {

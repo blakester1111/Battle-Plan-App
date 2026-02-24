@@ -3,7 +3,7 @@ import { ThemeProvider } from "@/providers/ThemeProvider";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Battle Plan",
+  title: "Admin Basics",
   description: "Project management app",
   icons: {
     icon: [

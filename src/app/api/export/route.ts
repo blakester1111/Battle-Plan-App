@@ -35,7 +35,7 @@ export async function POST(request: NextRequest) {
       extension = "pdf";
     }
 
-    const filename = `battle-plan.${extension}`;
+    const filename = `admin-basics.${extension}`;
 
     return new NextResponse(new Uint8Array(buffer), {
       headers: {
