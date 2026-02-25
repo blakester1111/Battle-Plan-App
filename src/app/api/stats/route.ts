@@ -103,6 +103,7 @@ export async function GET(req: Request) {
         userName: s.user_username,
         userFirstName: s.user_first_name,
         userLastName: s.user_last_name,
+        userOrg: s.user_org || undefined,
         userDivision: s.user_division,
         userDepartment: s.user_department,
         userPostTitle: s.user_post_title,

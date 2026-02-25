@@ -6,6 +6,7 @@ import { statsApi, statEntriesApi } from "@/lib/api";
 import { getDisplayName } from "@/lib/utils";
 import StatsList from "./StatsList";
 import StatGraph from "./StatGraph";
+import ES7Graph from "./ES7Graph";
 import TimeRangeSelector from "./TimeRangeSelector";
 import YAxisControls from "./YAxisControls";
 import StatEntryModal from "./StatEntryModal";
@@ -20,6 +21,7 @@ export default function StatsView() {
   const isComposite = !!selectedStat?.linkedStatIds?.length;
   const linkedStatIds = selectedStat?.linkedStatIds || [];
   const linkedStatNames = linkedStatIds.map(id => state.statDefinitions.find(s => s.id === id)?.name || "Unknown");
+  const isES7 = state.es7ViewMode === "es7";
 
   // Re-fetch stat definitions when periodType changes (for updated trend data)
   useEffect(() => {
@@ -38,9 +40,9 @@ export default function StatsView() {
     return () => { cancelled = true; };
   }, [config.periodType, dispatch]);
 
-  // Fetch entries when selected stat or date range changes
+  // Fetch entries when selected stat or date range changes (standard view only)
   const fetchEntries = useCallback(async () => {
-    if (!state.selectedStatId) return;
+    if (!state.selectedStatId || isES7) return;
 
     const now = new Date();
     let startDate: string;
@@ -77,7 +79,7 @@ export default function StatsView() {
     } catch (error) {
       console.error("Failed to fetch entries:", error);
     }
-  }, [state.selectedStatId, config.rangePreset, config.periodType, config.customStart, config.customEnd, dispatch]);
+  }, [state.selectedStatId, isES7, config.rangePreset, config.periodType, config.customStart, config.customEnd, dispatch]);
 
   useEffect(() => {
     fetchEntries();
@@ -85,7 +87,7 @@ export default function StatsView() {
 
   // Fetch entries for all linked stats when a composite stat is selected
   useEffect(() => {
-    if (!isComposite || linkedStatIds.length === 0) return;
+    if (!isComposite || linkedStatIds.length === 0 || isES7) return;
     let cancelled = false;
 
     async function fetchLinked() {
@@ -132,11 +134,11 @@ export default function StatsView() {
     fetchLinked();
     return () => { cancelled = true; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isComposite, linkedStatIds.join(","), config.rangePreset, config.periodType, config.customStart, config.customEnd, dispatch]);
+  }, [isComposite, isES7, linkedStatIds.join(","), config.rangePreset, config.periodType, config.customStart, config.customEnd, dispatch]);
 
-  // Fetch overlay stat entries when overlay config changes (skip for composites)
+  // Fetch overlay stat entries when overlay config changes (skip for composites and ES7)
   useEffect(() => {
-    if (isComposite) return;
+    if (isComposite || isES7) return;
     const overlayStatId = state.overlayConfig?.statId;
     if (!overlayStatId) return;
 
@@ -201,7 +203,7 @@ export default function StatsView() {
     }
     fetchOverlay();
     return () => { cancelled = true; };
-  }, [isComposite, state.overlayConfig?.statId, state.overlayConfig?.offsetPeriods, config.rangePreset, config.periodType, config.customStart, config.customEnd, dispatch]);
+  }, [isComposite, isES7, state.overlayConfig?.statId, state.overlayConfig?.offsetPeriods, config.rangePreset, config.periodType, config.customStart, config.customEnd, dispatch]);
 
   return (
     <div className="flex h-full -m-6">
@@ -239,13 +241,13 @@ export default function StatsView() {
                 })()}
               </>
             )}
-            <TimeRangeSelector />
+            {!isES7 && <TimeRangeSelector />}
           </div>
-          <YAxisControls />
+          {!isES7 && <YAxisControls />}
         </div>
 
         {/* Graph */}
-        <StatGraph />
+        {isES7 ? <ES7Graph /> : <StatGraph />}
       </div>
 
       {/* Entry modal */}

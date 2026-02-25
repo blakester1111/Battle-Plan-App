@@ -642,6 +642,50 @@ export const statEntriesApi = {
   },
 };
 
+// Stat Quotas API (Exec Series 7)
+export const statQuotasApi = {
+  async getForWeek(statId: string, weekEndingDate: string) {
+    const res = await fetch(
+      `${API_BASE}/stat-quotas?statId=${encodeURIComponent(statId)}&weekEndingDate=${encodeURIComponent(weekEndingDate)}`
+    );
+    if (!res.ok) throw new Error("Failed to fetch quota");
+    return res.json();
+  },
+
+  async upsert(quota: {
+    id: string;
+    statId: string;
+    weekEndingDate: string;
+    quotas: number[];
+  }) {
+    const res = await fetch(`${API_BASE}/stat-quotas`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(quota),
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      let errorMsg = `Failed to save quota (HTTP ${res.status})`;
+      try {
+        const data = JSON.parse(text);
+        if (data.error) errorMsg = data.error;
+      } catch {
+        if (text) errorMsg += `: ${text.slice(0, 200)}`;
+      }
+      throw new Error(errorMsg);
+    }
+    return res.json();
+  },
+
+  async delete(id: string) {
+    const res = await fetch(`${API_BASE}/stat-quotas?id=${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    });
+    if (!res.ok) throw new Error("Failed to delete quota");
+    return res.json();
+  },
+};
+
 // Archive API
 export const archiveApi = {
   async getAll() {

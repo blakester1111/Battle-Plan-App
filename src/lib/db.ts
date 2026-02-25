@@ -246,6 +246,26 @@ function runMigrations(database: DatabaseType) {
     }
   }
 
+  // Ensure stat_quotas table exists (for databases created before ES7 feature)
+  try {
+    database.exec(`
+      CREATE TABLE IF NOT EXISTS stat_quotas (
+        id TEXT PRIMARY KEY,
+        stat_id TEXT NOT NULL,
+        week_ending_date TEXT NOT NULL,
+        quotas_json TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE(stat_id, week_ending_date),
+        FOREIGN KEY (stat_id) REFERENCES stat_definitions(id) ON DELETE CASCADE
+      );
+      CREATE INDEX IF NOT EXISTS idx_stat_quotas_stat ON stat_quotas(stat_id);
+      CREATE INDEX IF NOT EXISTS idx_stat_quotas_lookup ON stat_quotas(stat_id, week_ending_date);
+    `);
+  } catch {
+    // Table likely already exists
+  }
+
   // Purge items soft-deleted more than 30 days ago
   const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
   database.prepare("DELETE FROM tasks WHERE deleted_at IS NOT NULL AND deleted_at < ?").run(thirtyDaysAgo);
@@ -446,10 +466,24 @@ function getDb(): DatabaseType {
       FOREIGN KEY (stat_id) REFERENCES stat_definitions(id) ON DELETE CASCADE
     );
 
+    -- Stat quotas for Exec Series 7 (per-stat per-week quota targets)
+    CREATE TABLE IF NOT EXISTS stat_quotas (
+      id TEXT PRIMARY KEY,
+      stat_id TEXT NOT NULL,
+      week_ending_date TEXT NOT NULL,
+      quotas_json TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE(stat_id, week_ending_date),
+      FOREIGN KEY (stat_id) REFERENCES stat_definitions(id) ON DELETE CASCADE
+    );
+
     CREATE INDEX IF NOT EXISTS idx_stat_definitions_user ON stat_definitions(user_id);
     CREATE INDEX IF NOT EXISTS idx_stat_definitions_created_by ON stat_definitions(created_by);
     CREATE INDEX IF NOT EXISTS idx_stat_entries_stat ON stat_entries(stat_id);
     CREATE INDEX IF NOT EXISTS idx_stat_entries_date ON stat_entries(stat_id, date);
+    CREATE INDEX IF NOT EXISTS idx_stat_quotas_stat ON stat_quotas(stat_id);
+    CREATE INDEX IF NOT EXISTS idx_stat_quotas_lookup ON stat_quotas(stat_id, week_ending_date);
   `);
 
   return db;
@@ -1445,6 +1479,7 @@ export interface DbStatDefinitionWithUser extends DbStatDefinition {
   user_username: string;
   user_first_name: string | null;
   user_last_name: string | null;
+  user_org: string | null;
   user_division: number | null;
   user_department: number | null;
   user_post_title: string | null;
@@ -1460,20 +1495,29 @@ export interface DbStatEntry {
   updated_at: string;
 }
 
+export interface DbStatQuota {
+  id: string;
+  stat_id: string;
+  week_ending_date: string;
+  quotas_json: string;
+  created_at: string;
+  updated_at: string;
+}
+
 // Stat definition operations
 export const statDefinitionOps = {
   // Get all stats visible to a user (own + created by them + juniors + terminals; admins see all)
   getForUser: (userId: string, isAdmin: boolean) => {
     if (isAdmin) {
       return getDb().prepare(`
-        SELECT sd.*, u.username as user_username, u.first_name as user_first_name, u.last_name as user_last_name, u.division as user_division, u.department as user_department, u.post_title as user_post_title
+        SELECT sd.*, u.username as user_username, u.first_name as user_first_name, u.last_name as user_last_name, u.org as user_org, u.division as user_division, u.department as user_department, u.post_title as user_post_title
         FROM stat_definitions sd
         JOIN users u ON sd.user_id = u.id
         ORDER BY sd.name
       `).all() as DbStatDefinitionWithUser[];
     }
     return getDb().prepare(`
-      SELECT sd.*, u.username as user_username, u.first_name as user_first_name, u.last_name as user_last_name, u.division as user_division, u.department as user_department, u.post_title as user_post_title
+      SELECT sd.*, u.username as user_username, u.first_name as user_first_name, u.last_name as user_last_name, u.org as user_org, u.division as user_division, u.department as user_department, u.post_title as user_post_title
       FROM stat_definitions sd
       JOIN users u ON sd.user_id = u.id
       WHERE sd.user_id = ?
@@ -1486,7 +1530,7 @@ export const statDefinitionOps = {
 
   getByUserId: (userId: string) => {
     return getDb().prepare(`
-      SELECT sd.*, u.username as user_username, u.first_name as user_first_name, u.last_name as user_last_name, u.division as user_division, u.department as user_department, u.post_title as user_post_title
+      SELECT sd.*, u.username as user_username, u.first_name as user_first_name, u.last_name as user_last_name, u.org as user_org, u.division as user_division, u.department as user_department, u.post_title as user_post_title
       FROM stat_definitions sd
       JOIN users u ON sd.user_id = u.id
       WHERE sd.user_id = ?
@@ -1496,7 +1540,7 @@ export const statDefinitionOps = {
 
   getById: (id: string) => {
     return getDb().prepare(`
-      SELECT sd.*, u.username as user_username, u.first_name as user_first_name, u.last_name as user_last_name, u.division as user_division, u.department as user_department, u.post_title as user_post_title
+      SELECT sd.*, u.username as user_username, u.first_name as user_first_name, u.last_name as user_last_name, u.org as user_org, u.division as user_division, u.department as user_department, u.post_title as user_post_title
       FROM stat_definitions sd
       JOIN users u ON sd.user_id = u.id
       WHERE sd.id = ?
@@ -1610,6 +1654,46 @@ export const statEntryOps = {
       ORDER BY date DESC
       LIMIT ?
     `).all(statId, beforeDate, periodType, n) as DbStatEntry[];
+  },
+};
+
+// Stat quota operations (Exec Series 7)
+export const statQuotaOps = {
+  getByStatAndWeek: (statId: string, weekEndingDate: string) => {
+    return getDb().prepare(`
+      SELECT * FROM stat_quotas WHERE stat_id = ? AND week_ending_date = ?
+    `).get(statId, weekEndingDate) as DbStatQuota | undefined;
+  },
+
+  getByStatId: (statId: string) => {
+    return getDb().prepare(`
+      SELECT * FROM stat_quotas WHERE stat_id = ? ORDER BY week_ending_date DESC
+    `).all(statId) as DbStatQuota[];
+  },
+
+  // Get the most recent quota on or before a given date (for inheriting quotas)
+  getMostRecentForStat: (statId: string, beforeOrOnDate: string) => {
+    return getDb().prepare(`
+      SELECT * FROM stat_quotas
+      WHERE stat_id = ? AND week_ending_date <= ?
+      ORDER BY week_ending_date DESC
+      LIMIT 1
+    `).get(statId, beforeOrOnDate) as DbStatQuota | undefined;
+  },
+
+  upsert: (quota: DbStatQuota) => {
+    const stmt = getDb().prepare(`
+      INSERT INTO stat_quotas (id, stat_id, week_ending_date, quotas_json, created_at, updated_at)
+      VALUES (@id, @stat_id, @week_ending_date, @quotas_json, @created_at, @updated_at)
+      ON CONFLICT(stat_id, week_ending_date)
+      DO UPDATE SET quotas_json = @quotas_json, updated_at = @updated_at
+    `);
+    stmt.run(quota);
+    return quota;
+  },
+
+  delete: (id: string) => {
+    getDb().prepare("DELETE FROM stat_quotas WHERE id = ?").run(id);
   },
 };
 

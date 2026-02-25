@@ -613,7 +613,7 @@ export default function StatGraph() {
     svgClone.setAttribute("height", "100%");
     svgClone.removeAttribute("style");
 
-    const isPortrait = printChartData.length <= 12;
+    const isPortrait = config.periodType === "weekly" || config.periodType === "monthly" || printChartData.length <= 12;
     const orientation = isPortrait ? "portrait" : "landscape";
 
     if (isPortrait) {
@@ -872,6 +872,32 @@ export default function StatGraph() {
               )}
             </>
           )}
+        </div>
+
+        {/* View mode toggle: Standard / ES7 */}
+        <div className="flex items-center border border-stone-300 dark:border-stone-600 rounded overflow-hidden text-xs">
+          <button
+            onClick={() => dispatch({ type: "SET_ES7_VIEW_MODE", payload: "standard" })}
+            className={`px-2 py-1 ${
+              state.es7ViewMode !== "es7"
+                ? `${accent.bg} text-white`
+                : "text-stone-500 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-stone-700"
+            }`}
+            title="Standard graph"
+          >
+            Std
+          </button>
+          <button
+            onClick={() => dispatch({ type: "SET_ES7_VIEW_MODE", payload: "es7" })}
+            className={`px-2 py-1 ${
+              state.es7ViewMode === "es7"
+                ? `${accent.bg} text-white`
+                : "text-stone-500 dark:text-stone-400 hover:bg-stone-100 dark:hover:bg-stone-700"
+            }`}
+            title="Exec Series 7 graph"
+          >
+            ES7
+          </button>
         </div>
 
         {/* Toggle data labels */}

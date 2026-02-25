@@ -195,6 +195,7 @@ export interface StatDefinition {
   userName?: string;
   userFirstName?: string;
   userLastName?: string;
+  userOrg?: "Day" | "Foundation";
   userDivision?: number;
   userDepartment?: number;
   userPostTitle?: string;
@@ -225,6 +226,24 @@ export interface StatsViewConfig {
   yAxisRightMax?: number;
   yAxisRightAuto?: boolean; // defaults to true (via ?? true)
   showLabels?: boolean;
+}
+
+// Exec Series 7 types
+export type ES7ViewMode = "standard" | "es7";
+
+export interface StatQuota {
+  id: string;
+  statId: string;
+  weekEndingDate: string; // YYYY-MM-DD
+  quotas: number[]; // array of quota values per slot (6 for Day, 8 for Foundation)
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ES7Config {
+  weekOffset: number; // 0 = current week, -1 = last week, etc.
+  showPrevWeek: boolean;
+  showDailyValues: boolean;
 }
 
 export interface AppState {
@@ -292,6 +311,10 @@ export interface AppState {
   statGraphUpColor: string;
   statGraphDownColor: string;
   overlayConfig: { statId: string; offsetPeriods: number } | null;
+  // Exec Series 7
+  es7ViewMode: ES7ViewMode;
+  es7Config: ES7Config;
+  statQuotas: Record<string, StatQuota>; // keyed by "statId:weekEndingDate"
 }
 
 export type AppAction =
@@ -380,4 +403,8 @@ export type AppAction =
   | { type: "TOGGLE_STATS_SIDEBAR" }
   | { type: "SET_STAT_GRAPH_COLORS"; payload: { useAccent: boolean; upColor: string; downColor: string } }
   | { type: "SET_OVERLAY_CONFIG"; payload: { statId: string; offsetPeriods: number } | null }
-  | { type: "SET_OVERLAY_OFFSET"; payload: number };
+  | { type: "SET_OVERLAY_OFFSET"; payload: number }
+  // Exec Series 7
+  | { type: "SET_ES7_VIEW_MODE"; payload: ES7ViewMode }
+  | { type: "SET_ES7_CONFIG"; payload: Partial<ES7Config> }
+  | { type: "SET_STAT_QUOTA"; payload: StatQuota };

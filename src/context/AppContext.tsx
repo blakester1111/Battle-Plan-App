@@ -8,7 +8,7 @@ import {
   useRef,
   type ReactNode,
 } from "react";
-import type { AppState, AppAction, KanbanTask, PriorityShortcuts, User, TaskNote, BPNote, WeeklyBattlePlanWithProgress, BoardSortMode, WeekSettings, DateFormatType, SidebarSectionId, AccentColor, RecurrenceRule, StatDefinition, StatEntry, StatsViewConfig } from "@/lib/types";
+import type { AppState, AppAction, KanbanTask, PriorityShortcuts, User, TaskNote, BPNote, WeeklyBattlePlanWithProgress, BoardSortMode, WeekSettings, DateFormatType, SidebarSectionId, AccentColor, RecurrenceRule, StatDefinition, StatEntry, StatsViewConfig, ES7ViewMode, ES7Config, StatQuota } from "@/lib/types";
 import { DEFAULT_PRIORITY_SHORTCUTS, DEFAULT_SIDEBAR_ORDER } from "@/lib/types";
 import { DEFAULT_WEEK_SETTINGS } from "@/lib/dateUtils";
 import { generateId, reassignOrder, getAccentClasses, type AccentColorConfig } from "@/lib/utils";
@@ -68,6 +68,9 @@ const initialState: AppState = {
   statGraphUpColor: "",
   statGraphDownColor: "",
   overlayConfig: null,
+  es7ViewMode: "standard" as ES7ViewMode,
+  es7Config: { weekOffset: 0, showPrevWeek: false, showDailyValues: false } as ES7Config,
+  statQuotas: {},
 };
 
 function appReducer(state: AppState, action: AppAction): AppState {
@@ -781,6 +784,31 @@ function appReducer(state: AppState, action: AppAction): AppState {
       };
     }
 
+    // ---- Exec Series 7 ----
+    case "SET_ES7_VIEW_MODE": {
+      return {
+        ...state,
+        es7ViewMode: action.payload,
+        _pendingSetting: { key: "es7ViewMode", value: action.payload },
+      } as AppState & { _pendingSetting: { key: string; value: unknown } };
+    }
+
+    case "SET_ES7_CONFIG": {
+      return {
+        ...state,
+        es7Config: { ...state.es7Config, ...action.payload },
+      };
+    }
+
+    case "SET_STAT_QUOTA": {
+      const q = action.payload;
+      const key = `${q.statId}:${q.weekEndingDate}`;
+      return {
+        ...state,
+        statQuotas: { ...state.statQuotas, [key]: q },
+      };
+    }
+
     default:
       return state;
   }
@@ -902,6 +930,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
           statGraphUpColor: (settings?.statGraphColors as { upColor?: string })?.upColor || "",
           statGraphDownColor: (settings?.statGraphColors as { downColor?: string })?.downColor || "",
           overlayConfig: null,
+          es7ViewMode: (settings?.es7ViewMode as ES7ViewMode) || "standard",
+          es7Config: { weekOffset: 0, showPrevWeek: false, showDailyValues: false },
+          statQuotas: {},
         },
       });
 
@@ -988,6 +1019,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         statGraphUpColor: "",
         statGraphDownColor: "",
         overlayConfig: null,
+        es7ViewMode: "standard",
+        es7Config: { weekOffset: 0, showPrevWeek: false, showDailyValues: false },
+        statQuotas: {},
       },
     });
     hydrated.current = false;
