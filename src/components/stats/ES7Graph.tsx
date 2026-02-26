@@ -1,10 +1,10 @@
 "use client";
 
-import { useState, useMemo, useEffect, useCallback } from "react";
+import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { useAppContext, useAccentColor } from "@/context/AppContext";
 import { useTheme } from "next-themes";
 import { statEntriesApi, statQuotasApi } from "@/lib/api";
-import { generateId } from "@/lib/utils";
+import { generateId, getDisplayName } from "@/lib/utils";
 import {
   Area,
   XAxis,
@@ -250,6 +250,7 @@ export default function ES7Graph() {
     const quotaValues = editing
       ? quotaInputs.map((v) => parseFloat(v) || 0)
       : (quota?.quotas || []);
+    const hasAnyQuota = quotaValues.length > 0 && quotaValues.some((v) => v !== 0);
 
     let cumulative = 0;
     let prevCumulative = 0;
@@ -288,7 +289,7 @@ export default function ES7Graph() {
         slotIndex: idx,
         label: slot.label,
         cumulative: dailyValue != null ? cumulative : null,
-        quota: cumulativeQuota > 0 ? cumulativeQuota : null,
+        quota: hasAnyQuota ? cumulativeQuota : null,
         daily: es7Config.showDailyValues && dailyValue != null ? dailyValue : null,
         prevCumulative: prevCumulativeVal,
       };
@@ -372,6 +373,134 @@ export default function ES7Graph() {
     return `W/E ${formatDate(weekEndingDate, state.dateFormat)}`;
   }, [weekEndingDate, state.dateFormat]);
 
+  const chartRef = useRef<HTMLDivElement>(null);
+
+  const accentFill = accent.swatch;
+  const gridColor = isDark ? "#44403c" : "#e7e5e4";
+  const labelColor = isDark ? "#d6d3d1" : "#44403c";
+  const blackLine = isDark ? "#e7e5e4" : "#1c1917";
+
+  const handlePrint = useCallback(() => {
+    const svgElement = chartRef.current?.querySelector("svg");
+    if (!svgElement || !selectedStat) return;
+
+    // Clone SVG and make it scalable to fill the page
+    const svgClone = svgElement.cloneNode(true) as SVGElement;
+    const rect = svgElement.getBoundingClientRect();
+    if (!svgClone.getAttribute("viewBox")) {
+      svgClone.setAttribute("viewBox", `0 0 ${rect.width} ${rect.height}`);
+    }
+    svgClone.setAttribute("width", "100%");
+    svgClone.setAttribute("height", "100%");
+    svgClone.removeAttribute("style");
+
+    // Landscape for ES7
+    svgClone.setAttribute("preserveAspectRatio", "xMidYMid meet");
+
+    // Increase axis font sizes for print
+    svgClone.querySelectorAll("text").forEach((textEl) => {
+      const fontSize = parseFloat(textEl.getAttribute("font-size") || textEl.style.fontSize || "0");
+      if (fontSize > 0 && fontSize <= 12) {
+        textEl.setAttribute("font-size", "14");
+      }
+    });
+
+    let svgData = new XMLSerializer().serializeToString(svgClone);
+
+    // Force light-mode colors for printing
+    if (isDark) {
+      const darkToLight: [string, string][] = [
+        ["#e7e5e4", "#1c1917"],
+        ["#d6d3d1", "#44403c"],
+        ["#a8a29e", "#78716c"],
+        ["#44403c", "#e7e5e4"],
+        ["#1c1917", "#ffffff"],
+      ];
+      darkToLight.forEach(([dark], i) => {
+        svgData = svgData.replaceAll(dark, `__CLR${i}__`);
+      });
+      darkToLight.forEach(([, light], i) => {
+        svgData = svgData.replaceAll(`__CLR${i}__`, light);
+      });
+    }
+
+    const statName = selectedStat.name;
+
+    // Build subtitle
+    const parts: string[] = [];
+    if (selectedStat.userDivision != null) parts.push(`Div ${selectedStat.userDivision}`);
+    if (selectedStat.userDepartment != null) parts.push(`Dept ${selectedStat.userDepartment}`);
+    if (selectedStat.userPostTitle) parts.push(selectedStat.userPostTitle);
+    const userName = getDisplayName({
+      username: selectedStat.userName || "Unknown",
+      firstName: selectedStat.userFirstName,
+      lastName: selectedStat.userLastName,
+    });
+    parts.push(userName);
+    const subtitle = parts.join(" \u00B7 ");
+
+    const weekInfo = weekLabel;
+
+    // Build legend with inline SVGs for reliable line rendering
+    const legendSvg = (stroke: string, width: number, dash: string, dots = false) =>
+      `<svg width="${width}" height="12" style="vertical-align:middle;margin-right:4px;"><line x1="0" y1="6" x2="${width}" y2="6" stroke="${stroke}" stroke-width="2.5" stroke-dasharray="${dash}" />${dots ? `<circle cx="4" cy="6" r="3" fill="${stroke}" /><circle cx="14" cy="6" r="3" fill="${stroke}" /><circle cx="24" cy="6" r="3" fill="${stroke}" />` : ""}</svg>`;
+    const legendItems: string[] = [
+      `<span style="margin-right:14px;white-space:nowrap;">${legendSvg("#1c1917", 28, "", true)}Cumulative</span>`,
+      `<span style="margin-right:14px;white-space:nowrap;">${legendSvg("#1c1917", 28, "0")}Quota</span>`,
+    ];
+    if (es7Config.showPrevWeek) {
+      legendItems.push(`<span style="margin-right:14px;white-space:nowrap;">${legendSvg("#1c1917", 28, "3 4")}Prev Week</span>`);
+    }
+    if (es7Config.showDailyValues) {
+      legendItems.push(`<span style="margin-right:14px;white-space:nowrap;">${legendSvg(accentFill, 28, "8 4")}Daily</span>`);
+    }
+    const legendHtml = legendItems.join("");
+
+    const iframe = document.createElement("iframe");
+    iframe.style.position = "fixed";
+    iframe.style.left = "-9999px";
+    iframe.style.top = "-9999px";
+    document.body.appendChild(iframe);
+
+    const doc = iframe.contentDocument || iframe.contentWindow?.document;
+    if (!doc) { document.body.removeChild(iframe); return; }
+
+    doc.open();
+    doc.write(`<!DOCTYPE html><html><head><title>${statName} — ES7</title>
+<style>
+  @page { size: letter landscape; margin: 0; }
+  html, body { margin: 0; padding: 0; width: 100%; height: 100%; font-family: system-ui, sans-serif; }
+  .container { width: 100%; height: 100%; padding: 0.4in 0.5in; box-sizing: border-box; display: flex; flex-direction: column; }
+  .header { display: flex; justify-content: space-between; align-items: flex-start; flex-shrink: 0; margin-bottom: 6px; }
+  .header-left { flex: 1; }
+  h1 { font-size: 20px; margin: 0 0 2px 0; color: #1c1917; }
+  .subtitle { font-size: 12px; color: #78716c; margin: 0 0 2px 0; }
+  .week-info { font-size: 12px; color: #44403c; font-weight: 500; margin: 0; }
+  .legend { font-size: 11px; color: #44403c; padding-top: 3px; white-space: nowrap; }
+  .chart { flex: 1; min-height: 0; }
+  .chart svg { width: 100%; height: 100%; display: block; }
+</style></head><body>
+<div class="container">
+  <div class="header">
+    <div class="header-left">
+      <h1>${statName}</h1>
+      ${subtitle ? `<p class="subtitle">${subtitle}</p>` : ""}
+      <p class="week-info">${weekInfo} &mdash; ${org} org</p>
+    </div>
+    <div class="legend">${legendHtml}</div>
+  </div>
+  <div class="chart">${svgData}</div>
+</div>
+</body></html>`);
+    doc.close();
+
+    setTimeout(() => {
+      iframe.contentWindow?.focus();
+      iframe.contentWindow?.print();
+      setTimeout(() => document.body.removeChild(iframe), 1000);
+    }, 250);
+  }, [selectedStat, weekLabel, org, isDark, accentFill, es7Config.showPrevWeek, es7Config.showDailyValues]);
+
   if (!selectedStat) {
     return (
       <div className="flex-1 flex items-center justify-center text-stone-400 dark:text-stone-500">
@@ -379,11 +508,6 @@ export default function ES7Graph() {
       </div>
     );
   }
-
-  const accentFill = accent.swatch;
-  const gridColor = isDark ? "#44403c" : "#e7e5e4";
-  const labelColor = isDark ? "#d6d3d1" : "#44403c";
-  const blackLine = isDark ? "#e7e5e4" : "#1c1917";
 
   return (
     <div className="flex-1 flex flex-col gap-3 min-h-0">
@@ -458,6 +582,19 @@ export default function ES7Graph() {
               Cancel
             </button>
           )}
+
+          {/* Print */}
+          <button
+            onClick={handlePrint}
+            className="p-1.5 rounded text-stone-400 hover:text-stone-600 dark:text-stone-500 dark:hover:text-stone-300 hover:bg-stone-100 dark:hover:bg-stone-800 transition-colors"
+            title="Print graph"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="6 9 6 2 18 2 18 9" />
+              <path d="M6 18H4a2 2 0 01-2-2v-5a2 2 0 012-2h16a2 2 0 012 2v5a2 2 0 01-2 2h-2" />
+              <rect x="6" y="14" width="12" height="8" />
+            </svg>
+          </button>
 
           {/* View mode toggle */}
           <div className="flex items-center border border-stone-300 dark:border-stone-600 rounded overflow-hidden text-xs ml-1">
@@ -572,7 +709,7 @@ export default function ES7Graph() {
       </div>
 
       {/* Chart */}
-      <div className="flex-1 min-h-0">
+      <div ref={chartRef} className="flex-1 min-h-0">
         <ResponsiveContainer width="100%" height="100%">
           <ComposedChart
             data={chartData}
