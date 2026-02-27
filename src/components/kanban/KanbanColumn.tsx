@@ -11,6 +11,7 @@ import { useAppContext, useAccentColor } from "@/context/AppContext";
 import type { KanbanTask, ColumnStatus } from "@/lib/types";
 import { cn, LABEL_COLORS, PRIORITY_COLORS, PRIORITY_LABELS } from "@/lib/utils";
 import { getStepLabel, getStepById } from "@/lib/conditionFormulas";
+import { formatDate } from "@/lib/dateUtils";
 
 // Formula badge style - neutral gray for readability
 const FORMULA_BADGE_STYLE = "bg-gray-100 text-gray-600 dark:bg-stone-700 dark:text-stone-400";
@@ -119,13 +120,29 @@ function SortableCard({ task, onClick, onMarkComplete, onDelete }: SortableCardP
       >
         <div className="flex items-center gap-2">
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium text-stone-800 dark:text-stone-200 leading-snug">
+            <p className={cn(
+              "text-sm font-medium text-stone-800 dark:text-stone-200 leading-snug",
+              isForwardedAway && "line-through text-stone-400 dark:text-stone-500"
+            )}>
               {task.title}
             </p>
+            {/* "Completed [date]" badge for tasks completed after their BP week */}
+            {(() => {
+              if (task.status !== "complete" || isForwardedAway || !task.completedAt) return null;
+              const activeBp = task.weeklyBpId ? state.weeklyBattlePlans.find(bp => bp.id === task.weeklyBpId) : null;
+              if (!activeBp) return null;
+              const weekEnd = new Date(new Date(activeBp.weekStart).getTime() + 7 * 24 * 60 * 60 * 1000);
+              if (new Date(task.completedAt) <= weekEnd) return null;
+              return (
+                <span className="inline-block mt-1 px-1.5 py-0.5 text-[10px] font-medium rounded bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400">
+                  Completed {formatDate(new Date(task.completedAt), state.dateFormat)}
+                </span>
+              );
+            })()}
             {/* Formula badge + step/task description */}
-            {(displayBadge || ((stepDescription || task.description) && state.showStepDescriptions)) && (
+            {((state.showFormulaBadge && displayBadge) || ((stepDescription || task.description) && state.showStepDescriptions)) && (
               <div className="flex items-start gap-1.5 mt-1.5">
-                {displayBadge && (
+                {state.showFormulaBadge && displayBadge && (
                   <span className={cn(
                     "shrink-0 mt-px px-1.5 py-0.5 text-[10px] font-medium rounded",
                     FORMULA_BADGE_STYLE

@@ -35,6 +35,7 @@ export async function GET(request: NextRequest) {
       sidebarOrder: allSettings.sidebarOrder ?? null,
       accentColor: allSettings.accentColor ?? null,
       showStepDescriptions: allSettings.showStepDescriptions ?? null,
+      showFormulaBadge: allSettings.showFormulaBadge ?? null,
       viewingStats: allSettings.viewingStats ?? null,
       selectedStatId: allSettings.selectedStatId ?? null,
       statsSidebarOpen: allSettings.statsSidebarOpen ?? null,

@@ -196,6 +196,15 @@ function runMigrations(database: DatabaseType) {
     }
   }
 
+  // Add completed_at column to tasks for tracking completion timestamp
+  if (!tasksColumns.has("completed_at")) {
+    try {
+      database.exec("ALTER TABLE tasks ADD COLUMN completed_at TEXT");
+    } catch {
+      // Column might already exist
+    }
+  }
+
   // Add gds column to stat_definitions if it doesn't exist
   const statDefInfo = database.prepare("PRAGMA table_info(stat_definitions)").all() as { name: string }[];
   const statDefColumns = new Set(statDefInfo.map((col) => col.name));
@@ -601,8 +610,8 @@ export const taskOps = {
 
   create: (task: DbTask) => {
     const stmt = getDb().prepare(`
-      INSERT INTO tasks (id, user_id, title, description, status, "order", created_at, label, priority, category, bugged, weekly_bp_id, formula_step_id, forwarded_from_task_id, forwarded_to_task_id, due_at, reminder_at, recurrence_rule, recurrence_source_id)
-      VALUES (@id, @user_id, @title, @description, @status, @order, @created_at, @label, @priority, @category, @bugged, @weekly_bp_id, @formula_step_id, @forwarded_from_task_id, @forwarded_to_task_id, @due_at, @reminder_at, @recurrence_rule, @recurrence_source_id)
+      INSERT INTO tasks (id, user_id, title, description, status, "order", created_at, label, priority, category, bugged, weekly_bp_id, formula_step_id, forwarded_from_task_id, forwarded_to_task_id, due_at, reminder_at, recurrence_rule, recurrence_source_id, completed_at)
+      VALUES (@id, @user_id, @title, @description, @status, @order, @created_at, @label, @priority, @category, @bugged, @weekly_bp_id, @formula_step_id, @forwarded_from_task_id, @forwarded_to_task_id, @due_at, @reminder_at, @recurrence_rule, @recurrence_source_id, @completed_at)
     `);
     stmt.run({
       id: task.id,
@@ -624,6 +633,7 @@ export const taskOps = {
       reminder_at: task.reminder_at || null,
       recurrence_rule: task.recurrence_rule || null,
       recurrence_source_id: task.recurrence_source_id || null,
+      completed_at: task.completed_at || null,
     });
     return task;
   },
@@ -679,8 +689,8 @@ export const taskOps = {
   forwardTasks: (userId: string, sourceTasks: DbTask[], targetBpId: string) => {
     const database = getDb();
     const insertStmt = database.prepare(`
-      INSERT INTO tasks (id, user_id, title, description, status, "order", created_at, label, priority, category, bugged, weekly_bp_id, formula_step_id, forwarded_from_task_id, forwarded_to_task_id, due_at, reminder_at, recurrence_rule, recurrence_source_id)
-      VALUES (@id, @user_id, @title, @description, @status, @order, @created_at, @label, @priority, @category, @bugged, @weekly_bp_id, @formula_step_id, @forwarded_from_task_id, @forwarded_to_task_id, @due_at, @reminder_at, @recurrence_rule, @recurrence_source_id)
+      INSERT INTO tasks (id, user_id, title, description, status, "order", created_at, label, priority, category, bugged, weekly_bp_id, formula_step_id, forwarded_from_task_id, forwarded_to_task_id, due_at, reminder_at, recurrence_rule, recurrence_source_id, completed_at)
+      VALUES (@id, @user_id, @title, @description, @status, @order, @created_at, @label, @priority, @category, @bugged, @weekly_bp_id, @formula_step_id, @forwarded_from_task_id, @forwarded_to_task_id, @due_at, @reminder_at, @recurrence_rule, @recurrence_source_id, @completed_at)
     `);
     const updateOriginalStmt = database.prepare(
       `UPDATE tasks SET forwarded_to_task_id = ? WHERE id = ? AND user_id = ?`
@@ -710,6 +720,7 @@ export const taskOps = {
           reminder_at: null,
           recurrence_rule: src.recurrence_rule || null,
           recurrence_source_id: null,
+          completed_at: null,
         });
         updateOriginalStmt.run(cloneId, src.id, userId);
         results.push({ originalId: src.id, cloneId });
@@ -1417,6 +1428,7 @@ export interface DbTask {
   reminder_at?: string | null;
   recurrence_rule?: string | null;
   recurrence_source_id?: string | null;
+  completed_at?: string | null;
 }
 
 export interface DbWeeklyBattlePlan {

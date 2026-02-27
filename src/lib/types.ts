@@ -144,6 +144,7 @@ export interface KanbanTask {
   reminderAt?: string | null;
   recurrenceRule?: RecurrenceRule | null;
   recurrenceSourceId?: string;
+  completedAt?: string | null;
 }
 
 // Weekly Battle Plan types
@@ -300,6 +301,7 @@ export interface AppState {
   sidebarOrder: SidebarSectionId[];
   // Display preferences
   showStepDescriptions: boolean;
+  showFormulaBadge: boolean;
   // Stats & Graphs
   viewingStats: boolean;
   statDefinitions: StatDefinition[];
@@ -325,7 +327,7 @@ export type AppAction =
   // Kanban
   | { type: "SET_TASKS"; payload: KanbanTask[] }
   | { type: "ADD_TASK"; payload: { title: string; description: string; status: ColumnStatus; label?: CardLabel; priority?: Priority; category?: string; bugged?: boolean; weeklyBpId?: string; formulaStepId?: string; dueAt?: string; reminderAt?: string; recurrenceRule?: RecurrenceRule } }
-  | { type: "UPDATE_TASK"; payload: { id: string; title?: string; description?: string; status?: ColumnStatus; label?: CardLabel; priority?: Priority; category?: string | null; bugged?: boolean; weeklyBpId?: string | null; formulaStepId?: string | null; dueAt?: string | null; reminderAt?: string | null; recurrenceRule?: RecurrenceRule | null } }
+  | { type: "UPDATE_TASK"; payload: { id: string; title?: string; description?: string; status?: ColumnStatus; label?: CardLabel; priority?: Priority; category?: string | null; bugged?: boolean; weeklyBpId?: string | null; formulaStepId?: string | null; dueAt?: string | null; reminderAt?: string | null; recurrenceRule?: RecurrenceRule | null; completedAt?: string | null } }
   | { type: "DELETE_TASK"; payload: { id: string } }
   | { type: "MOVE_TASK"; payload: { taskId: string; toStatus: ColumnStatus; toIndex: number } }
   | { type: "REORDER_TASK"; payload: { taskId: string; toIndex: number } }
@@ -380,6 +382,7 @@ export type AppAction =
   | { type: "SET_ACCENT_COLOR"; payload: AccentColor }
   // Display preferences
   | { type: "SET_SHOW_STEP_DESCRIPTIONS"; payload: boolean }
+  | { type: "SET_SHOW_FORMULA_BADGE"; payload: boolean }
   // Sidebar customization
   | { type: "SET_SIDEBAR_ORDER"; payload: SidebarSectionId[] }
   // Info Terminals

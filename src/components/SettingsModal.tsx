@@ -549,6 +549,36 @@ export default function SettingsModal({ onClose }: Props) {
                 />
               </button>
             </label>
+
+            <label className="flex items-center justify-between gap-3 cursor-pointer mt-3">
+              <div>
+                <span className="text-sm text-stone-600 dark:text-stone-300">
+                  Show formula badge on cards
+                </span>
+                <p className="text-xs text-stone-400 dark:text-stone-500 mt-0.5">
+                  When off, the formula code badge (e.g. NO-1) is hidden from cards
+                </p>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={state.showFormulaBadge}
+                onClick={() => dispatch({ type: "SET_SHOW_FORMULA_BADGE", payload: !state.showFormulaBadge })}
+                className={cn(
+                  "relative shrink-0 w-9 h-5 rounded-full transition-colors",
+                  state.showFormulaBadge
+                    ? "bg-stone-800 dark:bg-stone-200"
+                    : "bg-stone-300 dark:bg-stone-600"
+                )}
+              >
+                <span
+                  className={cn(
+                    "absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white dark:bg-stone-900 transition-transform shadow-sm",
+                    state.showFormulaBadge && "translate-x-4"
+                  )}
+                />
+              </button>
+            </label>
           </div>
 
           {/* Info Terminals */}

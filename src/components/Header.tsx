@@ -13,6 +13,7 @@ import TrashModal from "./TrashModal";
 import ArchiveModal from "./ArchiveModal";
 import PrintBPModal from "./PrintBPModal";
 import SearchModal from "./SearchModal";
+import RecurringTargetsModal from "./RecurringTargetsModal";
 
 export default function Header() {
   const { state, dispatch, logout } = useAppContext();
@@ -24,6 +25,7 @@ export default function Header() {
   const [showArchive, setShowArchive] = useState(false);
   const [showPrint, setShowPrint] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
+  const [showRecurring, setShowRecurring] = useState(false);
   const [trayOpen, setTrayOpen] = useState(false);
 
   const isAdmin = state.user?.role === "admin";
@@ -209,6 +211,29 @@ export default function Header() {
             <NotificationBell />
             {!state.viewingJunior && !state.viewingInfoTerminal && (
               <button
+                onClick={() => setShowRecurring(true)}
+                className="p-1.5 rounded text-stone-400 hover:text-stone-600 dark:text-stone-500 dark:hover:text-stone-300 transition-colors shrink-0"
+                aria-label="Recurring Targets"
+                title="Recurring Targets"
+              >
+                <svg
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <polyline points="23 4 23 10 17 10" />
+                  <polyline points="1 20 1 14 7 14" />
+                  <path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15" />
+                </svg>
+              </button>
+            )}
+            {!state.viewingJunior && !state.viewingInfoTerminal && (
+              <button
                 onClick={() => setShowPrint(true)}
                 className="p-1.5 rounded text-stone-400 hover:text-stone-600 dark:text-stone-500 dark:hover:text-stone-300 transition-colors shrink-0"
                 aria-label="Print"
@@ -336,6 +361,7 @@ export default function Header() {
       {showArchive && <ArchiveModal onClose={() => setShowArchive(false)} />}
       {showPrint && <PrintBPModal onClose={() => setShowPrint(false)} viewMode="own" />}
       {showSearch && <SearchModal onClose={() => setShowSearch(false)} />}
+      {showRecurring && <RecurringTargetsModal onClose={() => setShowRecurring(false)} />}
     </>
   );
 }

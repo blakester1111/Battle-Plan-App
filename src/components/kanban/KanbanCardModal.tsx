@@ -74,6 +74,7 @@ export default function KanbanCardModal({
   const [weeklyBpId, setWeeklyBpId] = useState<string>(task?.weeklyBpId ?? state.activeWeeklyBpId ?? "");
   const [dueAt, setDueAt] = useState<string>(task?.dueAt ? toDatetimeLocalValue(task.dueAt) : "");
   const [reminderAt, setReminderAt] = useState<string>(task?.reminderAt ? toDatetimeLocalValue(task.reminderAt) : "");
+  const [completedAt, setCompletedAt] = useState<string>(task?.completedAt ? task.completedAt.split("T")[0] : "");
   const [recurrenceFrequency, setRecurrenceFrequency] = useState<RecurrenceFrequency | "">(task?.recurrenceRule?.frequency ?? "");
   const [recurrenceStartDate, setRecurrenceStartDate] = useState<string>(task?.recurrenceRule?.startDate?.split("T")[0] ?? new Date().toISOString().split("T")[0]);
   const backdropRef = useRef<HTMLDivElement>(null);
@@ -133,6 +134,7 @@ export default function KanbanCardModal({
           dueAt: dueAt ? new Date(dueAt).toISOString() : null,
           reminderAt: reminderAt ? new Date(reminderAt).toISOString() : null,
           recurrenceRule: recurrenceRule || null,
+          completedAt: status === "complete" && completedAt ? new Date(completedAt).toISOString() : status === "complete" ? undefined : null,
         },
       });
       if (status !== task.status) {
@@ -373,6 +375,38 @@ export default function KanbanCardModal({
             />
           </div>
 
+          {/* Completed on date picker (only shown for completed tasks) */}
+          {status === "complete" && (
+            <div>
+              <label className="block text-[11px] font-medium uppercase tracking-wider text-stone-400 dark:text-stone-500 mb-1.5">
+                Completed On
+              </label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="date"
+                  value={completedAt}
+                  onChange={(e) => setCompletedAt(e.target.value)}
+                  className={cn(
+                    "flex-1 rounded px-3 py-2 text-sm bg-stone-50 dark:bg-stone-800/50 border border-stone-200 dark:border-stone-700/50 focus:outline-none focus:ring-2 transition-shadow",
+                    accent.ring
+                  )}
+                />
+                {completedAt && (
+                  <button
+                    type="button"
+                    onClick={() => setCompletedAt("")}
+                    className="text-xs text-stone-400 hover:text-stone-600 dark:hover:text-stone-300"
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+              <p className="mt-1 text-[10px] text-stone-400 dark:text-stone-500">
+                Set the date this task was actually completed. Useful for backdating to the correct week.
+              </p>
+            </div>
+          )}
+
           {/* Weekly Battle Plan Assignment */}
           <div>
             <label className="block text-[11px] font-medium uppercase tracking-wider text-stone-400 dark:text-stone-500 mb-1.5">
@@ -496,7 +530,7 @@ export default function KanbanCardModal({
             </div>
             {recurrenceFrequency && (
               <p className="mt-1.5 text-[10px] text-stone-400 dark:text-stone-500">
-                Repeats {recurrenceFrequency} from {recurrenceStartDate}. A new task is created when this one is completed.
+                Repeats {recurrenceFrequency} from {recurrenceStartDate}. A new task is automatically created on schedule.
               </p>
             )}
           </div>

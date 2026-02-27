@@ -53,6 +53,7 @@ const initialState: AppState = {
   accentColor: "amber" as AccentColor,
   sidebarOrder: DEFAULT_SIDEBAR_ORDER,
   showStepDescriptions: true,
+  showFormulaBadge: true,
   viewingStats: false,
   statDefinitions: [],
   statEntries: {},
@@ -586,6 +587,14 @@ function appReducer(state: AppState, action: AppAction): AppState {
       } as AppState & { _pendingSetting: { key: string; value: unknown } };
     }
 
+    case "SET_SHOW_FORMULA_BADGE": {
+      return {
+        ...state,
+        showFormulaBadge: action.payload,
+        _pendingSetting: { key: "showFormulaBadge", value: action.payload },
+      } as AppState & { _pendingSetting: { key: string; value: unknown } };
+    }
+
     case "SET_SIDEBAR_ORDER": {
       return {
         ...state,
@@ -915,6 +924,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           sidebarOrder: (settings?.sidebarOrder as SidebarSectionId[]) || DEFAULT_SIDEBAR_ORDER,
           formulaStepFilter: [],
           showStepDescriptions: settings?.showStepDescriptions ?? true,
+          showFormulaBadge: settings?.showFormulaBadge ?? true,
           viewingStats: settings?.viewingStats ?? false,
           statDefinitions: statsData?.stats || [],
           statEntries: {},
@@ -1004,6 +1014,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         accentColor: "amber",
         sidebarOrder: DEFAULT_SIDEBAR_ORDER,
         showStepDescriptions: true,
+        showFormulaBadge: true,
         viewingStats: false,
         statDefinitions: [],
         statEntries: {},
@@ -1148,9 +1159,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (!processedOps.current.has(opKey)) {
         processedOps.current.add(opKey);
         tasksApi.update(s._pendingUpdate.id, s._pendingUpdate.updates).then((res) => {
-          // If a recurring task was completed, add the new occurrence to state
-          if (res?.newRecurringTask) {
-            dispatch({ type: "SET_TASKS", payload: [...state.tasks.map(t => t.id === s._pendingUpdate!.id ? { ...t, recurrenceRule: undefined } : t), res.newRecurringTask] });
+          // If completing a forwarded clone, mark original as complete in local state
+          if (res?.originalTaskCompleted) {
+            const { id: origId, completedAt } = res.originalTaskCompleted;
+            dispatch({ type: "SET_TASKS", payload: state.tasks.map(t =>
+              t.id === origId ? { ...t, status: "complete" as const, completedAt } : t
+            ) });
           }
         }).catch(console.error);
       }
@@ -1159,7 +1173,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const opKey = `task-delete-${s._pendingDelete}`;
       if (!processedOps.current.has(opKey)) {
         processedOps.current.add(opKey);
-        tasksApi.delete(s._pendingDelete).catch(console.error);
+        tasksApi.delete(s._pendingDelete).then((res) => {
+          // If deleting a forwarded clone, clear forward link on original
+          if (res?.clearedForwardOnOriginal) {
+            dispatch({ type: "SET_TASKS", payload: state.tasks.map(t =>
+              t.id === res.clearedForwardOnOriginal ? { ...t, forwardedToTaskId: undefined } : t
+            ) });
+          }
+        }).catch(console.error);
       }
     }
     if (s._pendingReorder) {

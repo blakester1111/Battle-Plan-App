@@ -120,9 +120,9 @@ export default function KanbanCard({ task, isOverlay, onClick, onMarkComplete }:
             )}
           </div>
           {/* Formula badge + step/task description */}
-          {(displayBadge || ((stepDescription || task.description) && state.showStepDescriptions)) && (
+          {((state.showFormulaBadge && displayBadge) || ((stepDescription || task.description) && state.showStepDescriptions)) && (
             <div className="flex items-start gap-1.5 mt-1.5">
-              {displayBadge && (
+              {state.showFormulaBadge && displayBadge && (
                 <span className={cn(
                   "shrink-0 mt-px px-1.5 py-0.5 text-[10px] font-medium rounded",
                   FORMULA_BADGE_STYLE

@@ -3,7 +3,7 @@ import { taskOps, settingsOps, type DbTask } from "@/lib/db";
 import { getCurrentUserId } from "@/lib/auth";
 import { getWeekEndDate, DEFAULT_WEEK_SETTINGS } from "@/lib/dateUtils";
 import type { WeekSettings } from "@/lib/types";
-import { calculateNextRecurrence } from "@/lib/recurrence";
+import { isRecurrenceDue, getLatestDueDate } from "@/lib/recurrence";
 
 // Calculate the start of the current week from settings
 function getCurrentWeekStart(weekSettings: WeekSettings): string {
@@ -33,8 +33,54 @@ export async function GET() {
     }
 
     const tasks = taskOps.getAll(userId);
+
+    // Auto-create overdue recurring task instances (time-based)
+    for (const t of tasks) {
+      if (!t.recurrence_rule) continue;
+      try {
+        const rule = JSON.parse(t.recurrence_rule);
+        if (!rule.frequency || !rule.startDate) continue;
+        if (!isRecurrenceDue(rule)) continue;
+
+        // Find the latest due date (handles multiple missed intervals)
+        const latestDue = getLatestDueDate(rule);
+        const cloneId = crypto.randomUUID();
+        const newTask: DbTask = {
+          id: cloneId,
+          user_id: userId,
+          title: t.title,
+          description: t.description || "",
+          status: "todo",
+          order: 0,
+          created_at: new Date().toISOString(),
+          label: t.label || "none",
+          priority: t.priority || "none",
+          category: t.category || null,
+          bugged: 0,
+          weekly_bp_id: null,
+          formula_step_id: null,
+          forwarded_from_task_id: null,
+          forwarded_to_task_id: null,
+          due_at: t.due_at || null,
+          reminder_at: t.reminder_at || null,
+          recurrence_rule: JSON.stringify({ frequency: rule.frequency, startDate: latestDue.toISOString().split("T")[0] }),
+          recurrence_source_id: t.recurrence_source_id || t.id,
+          completed_at: null,
+        };
+        taskOps.create(newTask);
+        // Clear recurrence from the source task
+        taskOps.update(t.id, userId, { recurrence_rule: null });
+        t.recurrence_rule = null; // Update in-memory too
+      } catch {
+        // Skip invalid recurrence rules
+      }
+    }
+
+    // Re-fetch to include newly created recurring tasks
+    const allTasks = taskOps.getAll(userId);
+
     // Map to camelCase
-    const formatted = tasks.map((t) => ({
+    const formatted = allTasks.map((t) => ({
       id: t.id,
       title: t.title,
       description: t.description,
@@ -54,6 +100,7 @@ export async function GET() {
       recurrenceRule: t.recurrence_rule ? JSON.parse(t.recurrence_rule) : undefined,
       recurrenceSourceId: t.recurrence_source_id || undefined,
       archivedAt: t.archived_at || undefined,
+      completedAt: t.completed_at || undefined,
     }));
     return NextResponse.json(formatted);
   } catch (error) {
@@ -103,6 +150,7 @@ export async function POST(request: NextRequest) {
       reminder_at: body.reminderAt || null,
       recurrence_rule: body.recurrenceRule ? JSON.stringify(body.recurrenceRule) : null,
       recurrence_source_id: body.recurrenceSourceId || null,
+      completed_at: body.completedAt || null,
     });
     return NextResponse.json({
       id: task.id,
@@ -123,6 +171,7 @@ export async function POST(request: NextRequest) {
       reminderAt: task.reminder_at || undefined,
       recurrenceRule: task.recurrence_rule ? JSON.parse(task.recurrence_rule) : undefined,
       recurrenceSourceId: task.recurrence_source_id || undefined,
+      completedAt: task.completed_at || undefined,
     });
   } catch (error) {
     console.error("Error creating task:", error);
@@ -160,66 +209,34 @@ export async function PUT(request: NextRequest) {
     if (updates.reminderAt !== undefined) dbUpdates.reminder_at = updates.reminderAt || null;
     if (updates.recurrenceRule !== undefined) dbUpdates.recurrence_rule = updates.recurrenceRule ? JSON.stringify(updates.recurrenceRule) : null;
     if (updates.recurrenceSourceId !== undefined) dbUpdates.recurrence_source_id = updates.recurrenceSourceId || null;
+    if (updates.completedAt !== undefined) dbUpdates.completed_at = updates.completedAt || null;
+
+    // Auto-set completed_at when marking complete (if not explicitly provided)
+    if (updates.status === "complete" && updates.completedAt === undefined) {
+      dbUpdates.completed_at = new Date().toISOString();
+    }
+    // Clear completed_at when moving away from complete
+    if (updates.status && updates.status !== "complete" && updates.completedAt === undefined) {
+      dbUpdates.completed_at = null;
+    }
 
     taskOps.update(id, userId, dbUpdates);
 
-    // If a recurring task was marked complete, auto-create the next occurrence
-    let newRecurringTask = null;
+    // Sync completion from forwarded clone back to original
+    let originalTaskCompleted: { id: string; completedAt: string } | null = null;
     if (updates.status === "complete") {
       const completedTask = taskOps.getById(id);
-      if (completedTask?.recurrence_rule) {
-        try {
-          const rule = JSON.parse(completedTask.recurrence_rule);
-          const nextDate = calculateNextRecurrence(rule.frequency, new Date());
-          const cloneId = crypto.randomUUID();
-          const newTask: DbTask = {
-            id: cloneId,
-            user_id: userId,
-            title: completedTask.title,
-            description: completedTask.description || "",
-            status: "todo",
-            order: 0,
-            created_at: new Date().toISOString(),
-            label: completedTask.label || "none",
-            priority: completedTask.priority || "none",
-            category: completedTask.category || null,
-            bugged: 0,
-            weekly_bp_id: null,
-            formula_step_id: null, // Don't copy — recurring task may land in a different BP/step
-            forwarded_from_task_id: null,
-            forwarded_to_task_id: null,
-            due_at: completedTask.due_at || null,
-            reminder_at: completedTask.reminder_at || null,
-            recurrence_rule: completedTask.recurrence_rule,
-            recurrence_source_id: completedTask.recurrence_source_id || completedTask.id,
-          };
-          taskOps.create(newTask);
-          // Clear recurrence from the completed task so it doesn't trigger again
-          taskOps.update(id, userId, { recurrence_rule: null });
-          newRecurringTask = {
-            id: cloneId,
-            title: newTask.title,
-            description: newTask.description,
-            status: newTask.status,
-            order: newTask.order,
-            createdAt: newTask.created_at,
-            label: newTask.label,
-            priority: newTask.priority,
-            category: newTask.category,
-            bugged: false,
-            formulaStepId: undefined,
-            dueAt: newTask.due_at || undefined,
-            reminderAt: newTask.reminder_at || undefined,
-            recurrenceRule: rule,
-            recurrenceSourceId: newTask.recurrence_source_id || undefined,
-          };
-        } catch {
-          // Ignore recurrence creation errors
+      if (completedTask?.forwarded_from_task_id) {
+        const originalTask = taskOps.getById(completedTask.forwarded_from_task_id);
+        if (originalTask && originalTask.status !== "complete") {
+          const completedAt = (dbUpdates.completed_at as string) || new Date().toISOString();
+          taskOps.update(originalTask.id, userId, { status: "complete", completed_at: completedAt });
+          originalTaskCompleted = { id: originalTask.id, completedAt };
         }
       }
     }
 
-    return NextResponse.json({ success: true, newRecurringTask });
+    return NextResponse.json({ success: true, originalTaskCompleted });
   } catch (error) {
     console.error("Error updating task:", error);
     return NextResponse.json({ error: "Failed to update task" }, { status: 500 });
@@ -239,8 +256,19 @@ export async function DELETE(request: NextRequest) {
     if (!id) {
       return NextResponse.json({ error: "Missing task id" }, { status: 400 });
     }
+    // Check if this task is a forwarded clone — clear forward link on original
+    let clearedForwardOnOriginal: string | null = null;
+    const taskToDelete = taskOps.getById(id);
+    if (taskToDelete?.forwarded_from_task_id) {
+      const originalTask = taskOps.getById(taskToDelete.forwarded_from_task_id);
+      if (originalTask && originalTask.forwarded_to_task_id === id) {
+        taskOps.update(originalTask.id, userId, { forwarded_to_task_id: null });
+        clearedForwardOnOriginal = originalTask.id;
+      }
+    }
+
     taskOps.softDelete(id, userId);
-    return NextResponse.json({ success: true });
+    return NextResponse.json({ success: true, clearedForwardOnOriginal });
   } catch (error) {
     console.error("Error deleting task:", error);
     return NextResponse.json({ error: "Failed to delete task" }, { status: 500 });

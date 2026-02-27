@@ -297,7 +297,7 @@ export default function PrintBPModal({ onClose, viewMode, bpId }: PrintBPModalPr
         <div style="margin-bottom:14px;${isForwardedAway ? "opacity:0.5;" : ""}">
           <div style="display:flex;align-items:flex-start;gap:16px;">
             <div style="flex:1;min-width:0;">
-              <span style="font-weight:600;color:#000;">${escHtml(task.title)}</span>
+              <span style="font-weight:600;color:#000;${isForwardedAway ? "text-decoration:line-through;color:#888;" : ""}">${escHtml(task.title)}</span>${task.completedAt && task.status === "complete" && !isForwardedAway ? ` <span style="font-size:0.8em;color:#16a34a;">(Completed ${escHtml(formatDate(new Date(task.completedAt), state.dateFormat))})</span>` : ""}
               ${meta ? `<div style="margin-top:3px;">${meta}</div>` : ""}
               ${descLine}
             </div>
@@ -340,17 +340,16 @@ export default function PrintBPModal({ onClose, viewMode, bpId }: PrintBPModalPr
       }
     } else if (layoutMode === "formula") {
       if (activeBp && formula) {
-        // Single BP formula view
+        // Single BP formula view — show every step (even with no targets)
         for (const step of formula.steps) {
           const stepTasks = bpTasks
-            .filter((t) => t.formulaStepId === step.id && !t.forwardedFromTaskId)
+            .filter((t) => t.formulaStepId === step.id)
             .sort((a, b) => {
               const ap = PRIORITY_ORDER[a.priority || "none"];
               const bp2 = PRIORITY_ORDER[b.priority || "none"];
               if (ap !== bp2) return ap - bp2;
               return a.order - b.order;
             });
-          if (stepTasks.length === 0) continue;
           bodyContent += renderSectionHeader(
             `Step ${step.stepNumber}: ${step.description}`
           );
@@ -423,27 +422,16 @@ export default function PrintBPModal({ onClose, viewMode, bpId }: PrintBPModalPr
         }
       }
 
-      // Additional targets (no formulaStepId and not forwarded-in) — only for single BP
+      // Additional targets — tasks without a formulaStepId (includes forwarded tasks not assigned to a step)
       if (activeBp) {
         const additionalTasks = bpTasks
-          .filter((t) => !t.formulaStepId && !t.forwardedFromTaskId)
+          .filter((t) => !t.formulaStepId)
           .sort(sortByPriorityFormula);
         if (additionalTasks.length > 0) {
           bodyContent += renderSectionHeader("Additional Targets");
           for (const task of additionalTasks) {
             bodyContent += renderTask(task, "formula");
           }
-        }
-      }
-
-      // Forwarded-in tasks
-      const forwardedTasks = bpTasks
-        .filter((t) => !!t.forwardedFromTaskId)
-        .sort(sortByPriorityFormula);
-      if (forwardedTasks.length > 0) {
-        bodyContent += renderSectionHeader("From Previous Weeks");
-        for (const task of forwardedTasks) {
-          bodyContent += renderTask(task, "formula");
         }
       }
     } else if (layoutMode === "priority") {
@@ -478,7 +466,7 @@ export default function PrintBPModal({ onClose, viewMode, bpId }: PrintBPModalPr
 <html>
 <head>
   <meta charset="utf-8">
-  <title>Admin Basics - ${escHtml(displayName)}</title>
+  <title>Battle Plan - ${escHtml(displayName)}</title>
   <style>
     @page {
       margin: 0.6in 0.7in;
@@ -537,7 +525,7 @@ export default function PrintBPModal({ onClose, viewMode, bpId }: PrintBPModalPr
 </head>
 <body>
   <div class="header">
-    <h1>${escHtml(displayName)} &mdash; Admin Basics</h1>
+    <h1>${escHtml(displayName)} &mdash; Battle Plan</h1>
     <div class="date">${escHtml(today)}</div>
     <div class="bp-title">
       ${activeBp ? escHtml(activeBp.title) : ""}
@@ -545,7 +533,7 @@ export default function PrintBPModal({ onClose, viewMode, bpId }: PrintBPModalPr
     </div>
   </div>
   ${bodyContent}
-  <div class="footer">Admin Basics</div>
+  <div class="footer">Battle Plan</div>
 </body>
 </html>`;
   }, [bpTasks, layoutMode, fontSize, showCompleted, activeBp, formula, displayName, state.dateFormat, isMainBoard, bps, bpFormulaMap, visibility, includeLatestBPWriteups, latestBPWriteupsByStep]);
@@ -630,7 +618,7 @@ export default function PrintBPModal({ onClose, viewMode, bpId }: PrintBPModalPr
 
   // Build structured sections for export (reuses same grouping as print HTML)
   const buildExportSections = useCallback(() => {
-    const sections: { heading: string; tasks: { title: string; priority?: string; formulaBadge?: string; stepLabel?: string; description?: string; isForwarded?: boolean; isFromPrevWeek?: boolean; bugged?: boolean; showDoneLine?: boolean }[]; writeup?: string }[] = [];
+    const sections: { heading: string; tasks: { title: string; priority?: string; formulaBadge?: string; stepLabel?: string; description?: string; isForwarded?: boolean; isFromPrevWeek?: boolean; bugged?: boolean; showDoneLine?: boolean; completedAtLabel?: string }[]; writeup?: string }[] = [];
 
     function mapTask(task: KanbanTask, layout: LayoutMode) {
       const stepLabel = task.formulaStepId ? getStepLabel(task.formulaStepId) : "";
@@ -653,6 +641,11 @@ export default function PrintBPModal({ onClose, viewMode, bpId }: PrintBPModalPr
         }
       }
 
+      // "Completed [date]" label for non-forwarded completed tasks
+      const completedAtLabel = task.completedAt && task.status === "complete" && !task.forwardedToTaskId
+        ? `Completed ${formatDate(new Date(task.completedAt), state.dateFormat)}`
+        : undefined;
+
       return {
         title: task.title,
         priority: visibility.priority && layout !== "priority" ? priorityLabel : undefined,
@@ -663,6 +656,7 @@ export default function PrintBPModal({ onClose, viewMode, bpId }: PrintBPModalPr
         isFromPrevWeek: visibility.forwardedTags ? !!task.forwardedFromTaskId : undefined,
         bugged: visibility.bugged && task.bugged ? true : undefined,
         showDoneLine: visibility.doneLine,
+        completedAtLabel,
       };
     }
 
@@ -681,12 +675,10 @@ export default function PrintBPModal({ onClose, viewMode, bpId }: PrintBPModalPr
     } else if (layoutMode === "formula") {
       if (activeBp && formula) {
         for (const step of formula.steps) {
-          const stepTasks = bpTasks.filter((t) => t.formulaStepId === step.id && !t.forwardedFromTaskId).sort(sortByPriorityFormula);
-          if (stepTasks.length > 0) {
-            sections.push({ heading: `Step ${step.stepNumber}: ${step.description}`, tasks: stepTasks.map((t) => mapTask(t, "formula")), writeup: activeBp.stepWriteups?.[step.id] || undefined });
-          }
+          const stepTasks = bpTasks.filter((t) => t.formulaStepId === step.id).sort(sortByPriorityFormula);
+          sections.push({ heading: `Step ${step.stepNumber}: ${step.description}`, tasks: stepTasks.map((t) => mapTask(t, "formula")), writeup: activeBp.stepWriteups?.[step.id] || undefined });
         }
-        const additionalTasks = bpTasks.filter((t) => !t.formulaStepId && !t.forwardedFromTaskId).sort(sortByPriorityFormula);
+        const additionalTasks = bpTasks.filter((t) => !t.formulaStepId).sort(sortByPriorityFormula);
         if (additionalTasks.length > 0) sections.push({ heading: "Additional Targets", tasks: additionalTasks.map((t) => mapTask(t, "formula")) });
       } else {
         // Main board formula view
@@ -700,8 +692,6 @@ export default function PrintBPModal({ onClose, viewMode, bpId }: PrintBPModalPr
           }
         }
       }
-      const forwardedTasks = bpTasks.filter((t) => !!t.forwardedFromTaskId).sort(sortByPriorityFormula);
-      if (forwardedTasks.length > 0) sections.push({ heading: "From Previous Weeks", tasks: forwardedTasks.map((t) => mapTask(t, "formula")) });
     } else if (layoutMode === "priority") {
       const levels: Priority[] = ["high", "medium", "low", "none"];
       for (const level of levels) {
@@ -730,7 +720,7 @@ export default function PrintBPModal({ onClose, viewMode, bpId }: PrintBPModalPr
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           format,
-          title: `${displayName} — Admin Basics`,
+          title: `${displayName} — Battle Plan`,
           date: today,
           bpTitle: activeBp?.title,
           formulaName: formulaLabel,
@@ -752,7 +742,7 @@ export default function PrintBPModal({ onClose, viewMode, bpId }: PrintBPModalPr
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `admin-basics.${format}`;
+      a.download = `battle-plan.${format}`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -939,7 +929,7 @@ export default function PrintBPModal({ onClose, viewMode, bpId }: PrintBPModalPr
             {/* Print Header Preview */}
             <div className="text-center mb-5 pb-4 border-b-2 border-stone-800">
               <h3 className="font-bold text-stone-900" style={{ fontSize: `calc(${previewFontSize} * 1.4)` }}>
-                {displayName} &mdash; Admin Basics
+                {displayName} &mdash; Battle Plan
               </h3>
               <p className="text-stone-500 mt-0.5" style={{ fontSize: `calc(${previewFontSize} * 0.9)` }}>
                 {formatDate(new Date(), state.dateFormat)}
@@ -1105,30 +1095,21 @@ function FormulaStepPreview({
   if (formula) {
     for (const step of formula.steps) {
       const stepTasks = tasks.filter(
-        (t) => t.formulaStepId === step.id && !t.forwardedFromTaskId && t.status !== "complete"
+        (t) => t.formulaStepId === step.id && t.status !== "complete"
       );
-      if (stepTasks.length > 0) {
-        stepGroups.push({
-          label: `Step ${step.stepNumber}: ${step.description}`,
-          tasks: stepTasks,
-          writeup: stepWriteups?.[step.id],
-        });
-      }
+      stepGroups.push({
+        label: `Step ${step.stepNumber}: ${step.description}`,
+        tasks: stepTasks,
+        writeup: stepWriteups?.[step.id],
+      });
     }
   }
 
   const additional = tasks.filter(
-    (t) => !t.formulaStepId && !t.forwardedFromTaskId && t.status !== "complete"
+    (t) => !t.formulaStepId && t.status !== "complete"
   );
   if (additional.length > 0) {
     stepGroups.push({ label: "Additional Targets", tasks: additional });
-  }
-
-  const forwarded = tasks.filter(
-    (t) => !!t.forwardedFromTaskId && t.status !== "complete"
-  );
-  if (forwarded.length > 0) {
-    stepGroups.push({ label: "From Previous Weeks", tasks: forwarded });
   }
 
   return (
@@ -1231,6 +1212,7 @@ function PriorityPreview({
 }
 
 function PreviewTask({ task, layout, vis }: { task: KanbanTask; layout: LayoutMode; vis: PrintVisibility }) {
+  const { state } = useAppContext();
   const stepLabel = task.formulaStepId ? getStepLabel(task.formulaStepId) : "";
   const hasPriority = task.priority && task.priority !== "none";
   const isForwardedIn = !!task.forwardedFromTaskId;
@@ -1239,7 +1221,14 @@ function PreviewTask({ task, layout, vis }: { task: KanbanTask; layout: LayoutMo
   return (
     <div className={cn("flex items-start gap-3", isForwardedAway && "opacity-40")}>
       <div className="flex-1 min-w-0">
-        <p className="font-semibold text-black leading-snug">{task.title}</p>
+        <p className={cn("font-semibold text-black leading-snug", isForwardedAway && "line-through text-stone-400")}>
+          {task.title}
+          {task.completedAt && task.status === "complete" && !isForwardedAway && (
+            <span className="ml-1.5 text-green-600 font-normal" style={{ fontSize: "0.8em" }}>
+              (Completed {formatDate(new Date(task.completedAt), state.dateFormat)})
+            </span>
+          )}
+        </p>
         <div className="flex items-center gap-1.5 mt-0.5 flex-wrap" style={{ fontSize: "0.8em" }}>
           {vis.formulaBadge && stepLabel && layout !== "formula" && (
             <span className="px-1 py-0.5 rounded bg-stone-100 text-stone-500">{stepLabel}</span>
