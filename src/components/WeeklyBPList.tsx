@@ -6,6 +6,7 @@ import WeeklyBPModal from "./WeeklyBPModal";
 import BPNotesModal from "./BPNotesModal";
 import { cn } from "@/lib/utils";
 import { weeklyBPApi } from "@/lib/api";
+import { getStepById } from "@/lib/conditionFormulas";
 import ConfirmModal from "./ConfirmModal";
 import ForwardTasksModal from "./ForwardTasksModal";
 import PrintBPModal from "./PrintBPModal";
@@ -76,6 +77,39 @@ export default function WeeklyBPList() {
 
     return info;
   }, [weeklyBattlePlans, myBPNotes, state.user?.id]);
+
+  // Count earlier undone formula-step tasks per BP
+  const bpEarlierUndone = useMemo(() => {
+    const countMap: Record<string, number> = {};
+    for (const bp of weeklyBattlePlans) {
+      const bpDate = new Date(bp.weekStart.includes("T") ? bp.weekStart : bp.weekStart + "T00:00:00");
+      // Find BPs with earlier weekStart
+      const olderBpIds = new Set(
+        weeklyBattlePlans
+          .filter((other) => {
+            if (other.id === bp.id) return false;
+            const otherDate = new Date(other.weekStart.includes("T") ? other.weekStart : other.weekStart + "T00:00:00");
+            return otherDate < bpDate;
+          })
+          .map((other) => other.id)
+      );
+      if (olderBpIds.size === 0) {
+        countMap[bp.id] = 0;
+        continue;
+      }
+      countMap[bp.id] = tasks.filter(
+        (t) =>
+          t.weeklyBpId &&
+          olderBpIds.has(t.weeklyBpId) &&
+          t.formulaStepId &&
+          getStepById(t.formulaStepId) !== undefined &&
+          t.status !== "complete" &&
+          !t.forwardedToTaskId &&
+          !t.archivedAt
+      ).length;
+    }
+    return countMap;
+  }, [weeklyBattlePlans, tasks]);
 
   function handleSelectBP(bpId: string) {
     // Toggle off if clicking the same BP
@@ -244,6 +278,17 @@ export default function WeeklyBPList() {
                       <div className="text-xs text-stone-500 dark:text-stone-400 mb-2">
                         {bp.formulaName}
                       </div>
+                      {/* Earlier undone steps indicator */}
+                      {bpEarlierUndone[bp.id] > 0 && (
+                        <div className="flex items-center gap-1.5 mb-2 text-[10px] text-amber-600 dark:text-amber-400">
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+                            <line x1="12" y1="9" x2="12" y2="13" />
+                            <line x1="12" y1="17" x2="12.01" y2="17" />
+                          </svg>
+                          <span>{bpEarlierUndone[bp.id]} earlier undone step{bpEarlierUndone[bp.id] !== 1 ? "s" : ""}</span>
+                        </div>
+                      )}
                       {/* Progress Bar */}
                       {(() => {
                         const progress = bpProgress[bp.id] || { totalTasks: 0, completedTasks: 0, progressPercent: 0 };

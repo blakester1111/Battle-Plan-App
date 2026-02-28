@@ -87,7 +87,9 @@ export default function KanbanCardModal({
   const [category, setCategory] = useState<string>(task?.category ?? "");
   const [bugged, setBugged] = useState<boolean>(task?.bugged ?? false);
   const [formulaStepId, setFormulaStepId] = useState<string>(task?.formulaStepId ?? "");
-  const [weeklyBpId, setWeeklyBpId] = useState<string>(task?.weeklyBpId ?? state.activeWeeklyBpId ?? currentWeekBpId);
+  const [weeklyBpId, setWeeklyBpId] = useState<string>(
+    task ? (task.weeklyBpId ?? "") : (state.activeWeeklyBpId ?? currentWeekBpId)
+  );
   const [dueAt, setDueAt] = useState<string>(task?.dueAt ? toDatetimeLocalValue(task.dueAt) : "");
   const [reminderAt, setReminderAt] = useState<string>(task?.reminderAt ? toDatetimeLocalValue(task.reminderAt) : "");
   const [completedAt, setCompletedAt] = useState<string>(task?.completedAt ? task.completedAt.split("T")[0] : "");

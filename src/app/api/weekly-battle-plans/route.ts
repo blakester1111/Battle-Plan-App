@@ -99,6 +99,7 @@ export async function POST(request: NextRequest) {
           bugged: 0,
           weekly_bp_id: bp.id,
           formula_step_id: task.formulaStepId || null,
+          forwarded_from_task_id: task.forwardedFromTaskId || null,
           due_at: null,
           reminder_at: null,
           recurrence_rule: null,

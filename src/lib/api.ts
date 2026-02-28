@@ -462,6 +462,7 @@ export const weeklyBPApi = {
       description?: string;
       order: number;
       formulaStepId?: string;
+      forwardedFromTaskId?: string;
       label?: string;
       priority?: string;
       category?: string;

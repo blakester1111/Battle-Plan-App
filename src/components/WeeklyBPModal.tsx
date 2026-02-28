@@ -4,7 +4,7 @@ import { useState, useMemo } from "react";
 import { useAppContext, useAccentColor } from "@/context/AppContext";
 import { weeklyBPApi, tasksApi } from "@/lib/api";
 import { cn, generateId } from "@/lib/utils";
-import { CONDITION_FORMULAS, type ConditionFormula } from "@/lib/conditionFormulas";
+import { CONDITION_FORMULAS, type ConditionFormula, getFormulaById, getStepById } from "@/lib/conditionFormulas";
 import { generateWeeklyBPTitle, getWeekEndDate, getWeekStartDate, formatDate } from "@/lib/dateUtils";
 import Select from "@/components/ui/Select";
 
@@ -58,8 +58,33 @@ export default function WeeklyBPModal({ onClose, editBpId }: WeeklyBPModalProps)
     return {};
   });
 
+  // Auto-carry-forward additional targets from most recent prior BP (create mode only)
+  const priorAdditionalTargets = useMemo(() => {
+    if (editBpId) return [];
+    // Find the most recent BP (first in the list, sorted by weekStart desc)
+    const mostRecentBp = state.weeklyBattlePlans[0];
+    if (!mostRecentBp) return [];
+    // Find non-complete, non-forwarded additional targets (no formulaStepId)
+    return state.tasks.filter(
+      (t) =>
+        t.weeklyBpId === mostRecentBp.id &&
+        !t.formulaStepId &&
+        t.status !== "complete" &&
+        !t.forwardedToTaskId &&
+        !t.archivedAt
+    );
+  }, [editBpId, state.weeklyBattlePlans, state.tasks]);
+
   // Additional targets (only for NEW targets, not tied to existing tasks)
-  const [additionalTargets, setAdditionalTargets] = useState<string[]>([]);
+  // Pre-populated with carried-forward titles in create mode
+  const [additionalTargets, setAdditionalTargets] = useState<string[]>(() =>
+    !editBpId ? priorAdditionalTargets.map((t) => t.title) : []
+  );
+
+  // Track which additional targets are carried forward (by index matching initial priorAdditionalTargets)
+  const [carriedForwardSourceIds] = useState<string[]>(() =>
+    !editBpId ? priorAdditionalTargets.map((t) => t.id) : []
+  );
 
   // Existing additional tasks (for editing mode) - filtered by not deleted
   const existingAdditionalTasks = editBpId
@@ -79,6 +104,69 @@ export default function WeeklyBPModal({ onClose, editBpId }: WeeklyBPModalProps)
   const selectedFormula = useMemo(() => {
     return CONDITION_FORMULAS.find((f) => f.id === selectedFormulaId);
   }, [selectedFormulaId]);
+
+  // Earlier undone formula steps from older BPs
+  const earlierUndoneSteps = useMemo(() => {
+    // Determine the current BP's weekStart for comparison
+    const currentWeekStart = existingBP?.weekStart || getWeekStartDate(new Date(), state.weekSettings).toISOString();
+    const currentDate = new Date(currentWeekStart.includes("T") ? currentWeekStart : currentWeekStart + "T00:00:00");
+
+    // Find non-complete, non-forwarded, non-archived tasks WITH formulaStepId
+    // from BPs with earlier weekStart
+    const olderBpIds = new Set(
+      state.weeklyBattlePlans
+        .filter((bp) => {
+          if (editBpId && bp.id === editBpId) return false;
+          const bpDate = new Date(bp.weekStart.includes("T") ? bp.weekStart : bp.weekStart + "T00:00:00");
+          return bpDate < currentDate;
+        })
+        .map((bp) => bp.id)
+    );
+
+    if (olderBpIds.size === 0) return [];
+
+    const undoneTasks = state.tasks.filter(
+      (t) =>
+        t.weeklyBpId &&
+        olderBpIds.has(t.weeklyBpId) &&
+        t.formulaStepId &&
+        t.status !== "complete" &&
+        !t.forwardedToTaskId &&
+        !t.archivedAt
+    );
+
+    // Group by formulaStepId
+    const grouped: Record<string, { stepId: string; formulaId: string; stepNumber: number; formulaCode: string; formulaDisplayOrder: number; stepDescription: string; tasks: { title: string; bpTitle: string }[] }> = {};
+    for (const task of undoneTasks) {
+      const step = getStepById(task.formulaStepId!);
+      if (!step) continue;
+      const formula = getFormulaById(step.formulaId);
+      if (!formula) continue;
+      const bp = state.weeklyBattlePlans.find((b) => b.id === task.weeklyBpId);
+
+      if (!grouped[task.formulaStepId!]) {
+        grouped[task.formulaStepId!] = {
+          stepId: step.id,
+          formulaId: formula.id,
+          stepNumber: step.stepNumber,
+          formulaCode: formula.code,
+          formulaDisplayOrder: formula.displayOrder,
+          stepDescription: step.description,
+          tasks: [],
+        };
+      }
+      grouped[task.formulaStepId!].tasks.push({
+        title: task.title,
+        bpTitle: bp?.title || "Unknown BP",
+      });
+    }
+
+    // Sort: higher displayOrder (lower conditions) first, then step 1 before step 2
+    return Object.values(grouped).sort((a, b) => {
+      if (a.formulaDisplayOrder !== b.formulaDisplayOrder) return b.formulaDisplayOrder - a.formulaDisplayOrder;
+      return a.stepNumber - b.stepNumber;
+    });
+  }, [state.tasks, state.weeklyBattlePlans, editBpId, existingBP?.weekStart, state.weekSettings]);
 
   // Group formulas by related conditions for better UX
   const groupedFormulas = useMemo(() => {
@@ -257,15 +345,23 @@ export default function WeeklyBPModal({ onClose, editBpId }: WeeklyBPModalProps)
         }
 
         // Add additional targets (not tied to formula steps)
-        for (const target of additionalTargets) {
-          const trimmedTarget = target.trim();
+        // Track which ones are carried forward for post-create forwarding
+        const forwardPairs: { newTaskId: string; sourceTaskId: string }[] = [];
+        for (let i = 0; i < additionalTargets.length; i++) {
+          const trimmedTarget = additionalTargets[i].trim();
           if (trimmedTarget) {
+            const newId = generateId();
+            const sourceId = carriedForwardSourceIds[i]; // may be undefined for user-added
             tasks.push({
-              id: generateId(),
+              id: newId,
               title: trimmedTarget,
               description: "Additional target",
               order: taskIndex,
+              ...(sourceId ? { forwardedFromTaskId: sourceId } : {}),
             });
+            if (sourceId) {
+              forwardPairs.push({ newTaskId: newId, sourceTaskId: sourceId });
+            }
             taskIndex++;
           }
         }
@@ -286,6 +382,15 @@ export default function WeeklyBPModal({ onClose, editBpId }: WeeklyBPModalProps)
         });
 
         dispatch({ type: "ADD_WEEKLY_BP", payload: result.weeklyBattlePlan });
+
+        // Set forwardedToTaskId on original tasks for carried-forward additional targets
+        if (forwardPairs.length > 0) {
+          await Promise.all(
+            forwardPairs.map(({ newTaskId, sourceTaskId }) =>
+              tasksApi.update(sourceTaskId, { forwardedToTaskId: newTaskId })
+            )
+          );
+        }
       }
 
       // Refresh to get updated progress counts and tasks
@@ -617,6 +722,48 @@ export default function WeeklyBPModal({ onClose, editBpId }: WeeklyBPModalProps)
               placeholder="Any additional notes about this week's plan..."
             />
           </div>
+
+          {/* Earlier Undone Formula Steps */}
+          {earlierUndoneSteps.length > 0 && (
+            <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/50 rounded-lg p-4">
+              <div className="flex items-center gap-2 mb-3">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-amber-600 dark:text-amber-400">
+                  <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+                  <line x1="12" y1="9" x2="12" y2="13" />
+                  <line x1="12" y1="17" x2="12.01" y2="17" />
+                </svg>
+                <h3 className="text-sm font-medium text-amber-800 dark:text-amber-300">
+                  Earlier Undone Formula Steps
+                </h3>
+              </div>
+              <p className="text-xs text-amber-700 dark:text-amber-400/80 mb-3">
+                Per policy, these earlier formula steps must still be completed before moving to a higher condition.
+              </p>
+              <div className="space-y-3">
+                {earlierUndoneSteps.map((group) => (
+                  <div key={group.stepId} className="bg-white/60 dark:bg-stone-800/40 rounded p-3">
+                    <div className="flex items-center gap-2 mb-1.5">
+                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-semibold bg-amber-200 dark:bg-amber-800/60 text-amber-800 dark:text-amber-200">
+                        {group.formulaCode}-{group.stepNumber}
+                      </span>
+                      <span className="text-xs text-amber-700 dark:text-amber-400 leading-relaxed">
+                        {group.stepDescription.length > 80 ? group.stepDescription.slice(0, 80) + "..." : group.stepDescription}
+                      </span>
+                    </div>
+                    <div className="ml-1 space-y-1">
+                      {group.tasks.map((task, idx) => (
+                        <div key={idx} className="flex items-center gap-2 text-xs text-amber-600 dark:text-amber-400/70">
+                          <span className="w-1 h-1 rounded-full bg-amber-400 dark:bg-amber-600 shrink-0" />
+                          <span className="truncate">{task.title}</span>
+                          <span className="text-amber-500/60 dark:text-amber-500/40 shrink-0">({task.bpTitle})</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Footer */}
