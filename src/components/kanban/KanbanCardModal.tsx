@@ -102,6 +102,26 @@ export default function KanbanCardModal({
     ? CONDITION_FORMULAS.find((f) => f.id === currentStep.formulaId)
     : null;
 
+  // If the selected BP has a formula, only show that formula's steps
+  const selectedBP = weeklyBpId
+    ? state.weeklyBattlePlans.find((bp) => bp.id === weeklyBpId)
+    : null;
+  const bpFormula = selectedBP?.formulaId
+    ? CONDITION_FORMULAS.find((f) => f.id === selectedBP.formulaId)
+    : null;
+  const formulaStepGroups = bpFormula
+    ? [{ label: `${bpFormula.name} (${bpFormula.code})`, options: bpFormula.steps.map((step) => ({
+        value: step.id,
+        label: `${bpFormula.code}-${step.stepNumber}: ${step.description.slice(0, 50)}${step.description.length > 50 ? "..." : ""}`,
+      })) }]
+    : CONDITION_FORMULAS.map((formula) => ({
+        label: `${formula.name} (${formula.code})`,
+        options: formula.steps.map((step) => ({
+          value: step.id,
+          label: `${formula.code}-${step.stepNumber}: ${step.description.slice(0, 50)}${step.description.length > 50 ? "..." : ""}`,
+        })),
+      }));
+
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
       if (e.key === "Escape") onClose();
@@ -430,7 +450,19 @@ export default function KanbanCardModal({
             </label>
             <Select
               value={weeklyBpId}
-              onChange={setWeeklyBpId}
+              onChange={(newBpId) => {
+                setWeeklyBpId(newBpId);
+                // Clear formula step if it doesn't belong to the new BP's formula
+                if (formulaStepId) {
+                  const newBP = state.weeklyBattlePlans.find((bp) => bp.id === newBpId);
+                  if (newBP?.formulaId) {
+                    const newFormula = CONDITION_FORMULAS.find((f) => f.id === newBP.formulaId);
+                    if (newFormula && !newFormula.steps.some((s) => s.id === formulaStepId)) {
+                      setFormulaStepId("");
+                    }
+                  }
+                }
+              }}
               options={[
                 { value: "", label: "None" },
                 ...state.weeklyBattlePlans.map((bp) => ({ value: bp.id, label: `${bp.title} (${bp.formulaCode})` })),
@@ -447,14 +479,8 @@ export default function KanbanCardModal({
               value={formulaStepId}
               onChange={setFormulaStepId}
               groups={[
-                { label: "", options: [{ value: "", label: "None" }] },
-                ...CONDITION_FORMULAS.map((formula) => ({
-                  label: `${formula.name} (${formula.code})`,
-                  options: formula.steps.map((step) => ({
-                    value: step.id,
-                    label: `${formula.code}-${step.stepNumber}: ${step.description.slice(0, 50)}${step.description.length > 50 ? "..." : ""}`,
-                  })),
-                })),
+                { label: "", options: [{ value: "", label: "None (additional target)" }] },
+                ...formulaStepGroups,
               ]}
               placeholder="None"
             />
