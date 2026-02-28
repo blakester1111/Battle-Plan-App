@@ -66,9 +66,14 @@ export default function KanbanCardModal({
   // Find the BP for the current week (if any) — used as default for new tasks
   const currentWeekBpId = (() => {
     if (state.weeklyBattlePlans.length === 0) return "";
-    const weekStartMs = getWeekStartDate(new Date(), state.weekSettings).getTime();
+    const ws = getWeekStartDate(new Date(), state.weekSettings);
+    const wsY = ws.getFullYear(), wsM = ws.getMonth(), wsD = ws.getDate();
     return state.weeklyBattlePlans.find((bp) => {
-      return new Date(bp.weekStart).getTime() === weekStartMs;
+      // Handle both "YYYY-MM-DD" and full ISO formats
+      const d = bp.weekStart.includes("T")
+        ? new Date(bp.weekStart)
+        : new Date(bp.weekStart + "T00:00:00");
+      return d.getFullYear() === wsY && d.getMonth() === wsM && d.getDate() === wsD;
     })?.id || "";
   })();
 
@@ -82,11 +87,7 @@ export default function KanbanCardModal({
   const [category, setCategory] = useState<string>(task?.category ?? "");
   const [bugged, setBugged] = useState<boolean>(task?.bugged ?? false);
   const [formulaStepId, setFormulaStepId] = useState<string>(task?.formulaStepId ?? "");
-  // For new tasks: default to the active BP (if viewing one) or current week's BP
-  // For existing tasks: use the task's actual weeklyBpId (don't apply fallback to avoid misleading display)
-  const [weeklyBpId, setWeeklyBpId] = useState<string>(
-    task ? (task.weeklyBpId ?? "") : (state.activeWeeklyBpId ?? currentWeekBpId)
-  );
+  const [weeklyBpId, setWeeklyBpId] = useState<string>(task?.weeklyBpId ?? state.activeWeeklyBpId ?? currentWeekBpId);
   const [dueAt, setDueAt] = useState<string>(task?.dueAt ? toDatetimeLocalValue(task.dueAt) : "");
   const [reminderAt, setReminderAt] = useState<string>(task?.reminderAt ? toDatetimeLocalValue(task.reminderAt) : "");
   const [completedAt, setCompletedAt] = useState<string>(task?.completedAt ? task.completedAt.split("T")[0] : "");

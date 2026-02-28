@@ -37,12 +37,17 @@ export default function TodoList() {
   const [input, setInput] = useState("");
   const [showArchive, setShowArchive] = useState(false);
 
-  // Find the BP for the current week (if any) — uses exact timestamp match
+  // Find the BP for the current week (if any) — compares by local date
   const currentWeekBpId = useMemo(() => {
     if (state.weeklyBattlePlans.length === 0) return undefined;
-    const weekStartMs = getWeekStartDate(new Date(), state.weekSettings).getTime();
+    const ws = getWeekStartDate(new Date(), state.weekSettings);
+    const wsY = ws.getFullYear(), wsM = ws.getMonth(), wsD = ws.getDate();
     return state.weeklyBattlePlans.find((bp) => {
-      return new Date(bp.weekStart).getTime() === weekStartMs;
+      // Handle both "YYYY-MM-DD" and full ISO formats
+      const d = bp.weekStart.includes("T")
+        ? new Date(bp.weekStart)
+        : new Date(bp.weekStart + "T00:00:00");
+      return d.getFullYear() === wsY && d.getMonth() === wsM && d.getDate() === wsD;
     })?.id;
   }, [state.weeklyBattlePlans, state.weekSettings]);
 
