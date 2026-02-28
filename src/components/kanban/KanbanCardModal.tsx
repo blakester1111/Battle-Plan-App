@@ -6,7 +6,7 @@ import { DEFAULT_CATEGORIES as CATEGORIES } from "@/lib/types";
 import { useAppContext, useAccentColor } from "@/context/AppContext";
 import { cn, LABEL_COLORS, PRIORITY_COLORS, PRIORITY_LABELS } from "@/lib/utils";
 import { CONDITION_FORMULAS, getStepById } from "@/lib/conditionFormulas";
-import { getWeekEndDate } from "@/lib/dateUtils";
+import { getWeekStartDate } from "@/lib/dateUtils";
 import Select from "@/components/ui/Select";
 import ConfirmModal from "@/components/ConfirmModal";
 
@@ -66,12 +66,9 @@ export default function KanbanCardModal({
   // Find the BP for the current week (if any) — used as default for new tasks
   const currentWeekBpId = (() => {
     if (state.weeklyBattlePlans.length === 0) return "";
-    const now = new Date();
-    const weekEnd = getWeekEndDate(now, state.weekSettings);
-    const weekStart = new Date(weekEnd.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const weekStartMs = getWeekStartDate(new Date(), state.weekSettings).getTime();
     return state.weeklyBattlePlans.find((bp) => {
-      const bpStart = new Date(bp.weekStart);
-      return bpStart >= weekStart && bpStart < weekEnd;
+      return new Date(bp.weekStart).getTime() === weekStartMs;
     })?.id || "";
   })();
 
@@ -85,7 +82,11 @@ export default function KanbanCardModal({
   const [category, setCategory] = useState<string>(task?.category ?? "");
   const [bugged, setBugged] = useState<boolean>(task?.bugged ?? false);
   const [formulaStepId, setFormulaStepId] = useState<string>(task?.formulaStepId ?? "");
-  const [weeklyBpId, setWeeklyBpId] = useState<string>(task?.weeklyBpId ?? state.activeWeeklyBpId ?? currentWeekBpId);
+  // For new tasks: default to the active BP (if viewing one) or current week's BP
+  // For existing tasks: use the task's actual weeklyBpId (don't apply fallback to avoid misleading display)
+  const [weeklyBpId, setWeeklyBpId] = useState<string>(
+    task ? (task.weeklyBpId ?? "") : (state.activeWeeklyBpId ?? currentWeekBpId)
+  );
   const [dueAt, setDueAt] = useState<string>(task?.dueAt ? toDatetimeLocalValue(task.dueAt) : "");
   const [reminderAt, setReminderAt] = useState<string>(task?.reminderAt ? toDatetimeLocalValue(task.reminderAt) : "");
   const [completedAt, setCompletedAt] = useState<string>(task?.completedAt ? task.completedAt.split("T")[0] : "");

@@ -72,6 +72,23 @@ export function formatDate(date: Date, format: DateFormatType): string {
   }
 }
 
+/**
+ * Returns the start boundary of the current week as a Date.
+ * Uses the same algorithm as WeeklyBPModal's getWeekStart() so that
+ * BP weekStart values can be matched by exact timestamp comparison.
+ */
+export function getWeekStartDate(now: Date, settings: WeekSettings): Date {
+  const { weekStartDay, weekStartHour } = settings;
+  const startBoundary = new Date(now);
+  startBoundary.setHours(weekStartHour, 0, 0, 0);
+  const daysSinceStart = (now.getDay() - weekStartDay + 7) % 7;
+  startBoundary.setDate(startBoundary.getDate() - daysSinceStart);
+  if (now < startBoundary) {
+    startBoundary.setDate(startBoundary.getDate() - 7);
+  }
+  return startBoundary;
+}
+
 export function getWeekEndDate(now: Date, settings: WeekSettings): Date {
   const { weekStartDay, weekStartHour, weekEndDay, weekEndHour } = settings;
 
@@ -117,10 +134,16 @@ export function generateWeeklyBPTitle(settings: WeekSettings, dateFormat: DateFo
 
 // Given a date, find the next occurrence of weekEndDay on or after that date.
 // Used to determine which week-ending date a given date belongs to.
-export function getWeekEndingDateForDate(date: Date, weekEndDay: number): Date {
+// When boundaryHour is provided and today IS the end day, we check whether
+// we've already passed the boundary hour — if so, the next week ending is 7 days out.
+export function getWeekEndingDateForDate(date: Date, weekEndDay: number, boundaryHour?: number): Date {
   const d = new Date(date.getFullYear(), date.getMonth(), date.getDate());
   const currentDay = d.getDay();
-  const daysUntilEnd = (weekEndDay - currentDay + 7) % 7;
+  let daysUntilEnd = (weekEndDay - currentDay + 7) % 7;
+  // If today is the end day and we've passed the boundary hour, move to next week
+  if (daysUntilEnd === 0 && boundaryHour != null && date.getHours() >= boundaryHour) {
+    daysUntilEnd = 7;
+  }
   d.setDate(d.getDate() + daysUntilEnd);
   return d;
 }

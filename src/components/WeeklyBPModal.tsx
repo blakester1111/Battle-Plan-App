@@ -5,7 +5,7 @@ import { useAppContext, useAccentColor } from "@/context/AppContext";
 import { weeklyBPApi, tasksApi } from "@/lib/api";
 import { cn, generateId } from "@/lib/utils";
 import { CONDITION_FORMULAS, type ConditionFormula } from "@/lib/conditionFormulas";
-import { generateWeeklyBPTitle, getWeekEndDate, formatDate } from "@/lib/dateUtils";
+import { generateWeeklyBPTitle, getWeekEndDate, getWeekStartDate, formatDate } from "@/lib/dateUtils";
 import Select from "@/components/ui/Select";
 
 interface WeeklyBPModalProps {
@@ -19,23 +19,7 @@ export default function WeeklyBPModal({ onClose, editBpId }: WeeklyBPModalProps)
 
   // Get week start date based on user's week settings
   const getWeekStart = () => {
-    const now = new Date();
-    const { weekStartDay, weekStartHour } = state.weekSettings;
-
-    // Find the most recent week start boundary
-    const startBoundary = new Date(now);
-    startBoundary.setHours(weekStartHour, 0, 0, 0);
-
-    // Roll back to the correct start day
-    const daysSinceStart = (now.getDay() - weekStartDay + 7) % 7;
-    startBoundary.setDate(startBoundary.getDate() - daysSinceStart);
-
-    // If we haven't reached the start hour today, go back another week
-    if (now < startBoundary) {
-      startBoundary.setDate(startBoundary.getDate() - 7);
-    }
-
-    return startBoundary.toISOString();
+    return getWeekStartDate(new Date(), state.weekSettings).toISOString();
   };
 
   // Generate default title and compute week-ending date

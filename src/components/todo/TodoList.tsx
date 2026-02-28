@@ -6,7 +6,7 @@ import { useAppContext, useAccentColor } from "@/context/AppContext";
 import type { KanbanTask, ColumnStatus } from "@/lib/types";
 import { DEFAULT_PRIORITY_SHORTCUTS } from "@/lib/types";
 import { cn, PRIORITY_COLORS, parsePriorityFromText, parseBuggedFromText } from "@/lib/utils";
-import { getWeekEndDate } from "@/lib/dateUtils";
+import { getWeekStartDate } from "@/lib/dateUtils";
 
 import type { Priority } from "@/lib/types";
 
@@ -37,15 +37,12 @@ export default function TodoList() {
   const [input, setInput] = useState("");
   const [showArchive, setShowArchive] = useState(false);
 
-  // Find the BP for the current week (if any)
+  // Find the BP for the current week (if any) — uses exact timestamp match
   const currentWeekBpId = useMemo(() => {
     if (state.weeklyBattlePlans.length === 0) return undefined;
-    const now = new Date();
-    const weekEnd = getWeekEndDate(now, state.weekSettings);
-    const weekStart = new Date(weekEnd.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const weekStartMs = getWeekStartDate(new Date(), state.weekSettings).getTime();
     return state.weeklyBattlePlans.find((bp) => {
-      const bpStart = new Date(bp.weekStart);
-      return bpStart >= weekStart && bpStart < weekEnd;
+      return new Date(bp.weekStart).getTime() === weekStartMs;
     })?.id;
   }, [state.weeklyBattlePlans, state.weekSettings]);
 
