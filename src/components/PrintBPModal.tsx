@@ -105,6 +105,14 @@ function createSortByPriorityFormula(
   };
 }
 
+// Sort additional targets: forwarded-from-prior-week first, then new targets, by manual order
+function sortAdditionalTargets(a: KanbanTask, b: KanbanTask): number {
+  const aForwarded = a.forwardedFromTaskId ? 0 : 1;
+  const bForwarded = b.forwardedFromTaskId ? 0 : 1;
+  if (aForwarded !== bForwarded) return aForwarded - bForwarded;
+  return a.order - b.order;
+}
+
 function escHtml(str: string): string {
   return str
     .replace(/&/g, "&amp;")
@@ -122,7 +130,7 @@ export default function PrintBPModal({ onClose, viewMode, bpId }: PrintBPModalPr
   const [showCompleted, setShowCompleted] = useState(false);
   const [visibility, setVisibility] = useState<PrintVisibility>(DEFAULT_VISIBILITY);
   const [showCustomize, setShowCustomize] = useState(false);
-  const [includeLatestBPWriteups, setIncludeLatestBPWriteups] = useState(false);
+  const [includeWriteups, setIncludeWriteups] = useState(true);
 
   // Resolve data source based on viewMode
   const { tasks, bps, person } = useMemo(() => {
@@ -220,6 +228,88 @@ export default function PrintBPModal({ onClose, viewMode, bpId }: PrintBPModalPr
     }
     return m;
   }, [isMainBoard, bps]);
+
+  // Earlier undone formula steps from older BPs (single-BP view only)
+  // Grouped by formula, then by step within each formula
+  const earlierUndoneFormulas = useMemo(() => {
+    if (!activeBp) return [];
+
+    const currentDate = new Date(
+      activeBp.weekStart.includes("T") ? activeBp.weekStart : activeBp.weekStart + "T00:00:00"
+    );
+
+    // Find BPs with earlier weekStart
+    const olderBps = bps.filter((bp) => {
+      if (bp.id === activeBp.id) return false;
+      const bpDate = new Date(bp.weekStart.includes("T") ? bp.weekStart : bp.weekStart + "T00:00:00");
+      return bpDate < currentDate;
+    });
+    const olderBpIds = new Set(olderBps.map((bp) => bp.id));
+
+    if (olderBpIds.size === 0) return [];
+
+    // Find undone formula step tasks from older BPs
+    const undoneTasks = tasks.filter(
+      (t) =>
+        t.weeklyBpId &&
+        olderBpIds.has(t.weeklyBpId) &&
+        t.formulaStepId &&
+        t.status !== "complete" &&
+        !t.forwardedToTaskId &&
+        !t.archivedAt
+    );
+
+    // Group by formula, then by step within each formula
+    const byFormula: Record<string, {
+      formulaId: string;
+      formulaName: string;
+      formulaCode: string;
+      formulaDisplayOrder: number;
+      steps: Record<string, {
+        stepNumber: number;
+        stepDescription: string;
+        writeup: string;
+        tasks: KanbanTask[];
+      }>;
+    }> = {};
+
+    for (const task of undoneTasks) {
+      const step = getStepById(task.formulaStepId!);
+      if (!step) continue;
+      const f = getFormulaById(step.formulaId);
+      if (!f) continue;
+      const bp = bps.find((b) => b.id === task.weeklyBpId);
+
+      if (!byFormula[f.id]) {
+        byFormula[f.id] = {
+          formulaId: f.id,
+          formulaName: f.name,
+          formulaCode: f.code,
+          formulaDisplayOrder: f.displayOrder,
+          steps: {},
+        };
+      }
+      if (!byFormula[f.id].steps[task.formulaStepId!]) {
+        byFormula[f.id].steps[task.formulaStepId!] = {
+          stepNumber: step.stepNumber,
+          stepDescription: step.description,
+          writeup: bp?.stepWriteups?.[task.formulaStepId!] || "",
+          tasks: [],
+        };
+      }
+      byFormula[f.id].steps[task.formulaStepId!].tasks.push(task);
+    }
+
+    // Sort formulas: higher displayOrder (lower conditions) first — Confusion before Power
+    return Object.values(byFormula)
+      .sort((a, b) => b.formulaDisplayOrder - a.formulaDisplayOrder)
+      .map((f) => ({
+        formulaName: f.formulaName,
+        formulaCode: f.formulaCode,
+        formulaDisplayOrder: f.formulaDisplayOrder,
+        steps: Object.values(f.steps).sort((a, b) => a.stepNumber - b.stepNumber),
+      }));
+  }, [tasks, bps, activeBp]);
 
   // Build print HTML
   const buildPrintHTML = useCallback(() => {
@@ -353,40 +443,71 @@ export default function PrintBPModal({ onClose, viewMode, bpId }: PrintBPModalPr
           bodyContent += renderSectionHeader(
             `Step ${step.stepNumber}: ${step.description}`
           );
-          // Write-up text under step heading
-          const writeup = activeBp.stepWriteups?.[step.id];
-          if (writeup) {
-            bodyContent += `<div style="margin:-4px 0 12px 0;color:#444;font-size:0.95em;font-style:italic;line-height:1.6;">${escHtml(writeup)}</div>`;
+          // Write-up text under step heading (controlled by checkbox)
+          if (includeWriteups) {
+            const writeup = activeBp.stepWriteups?.[step.id];
+            if (writeup) {
+              bodyContent += `<div style="margin:-4px 0 12px 0;color:#444;font-size:0.95em;font-style:italic;line-height:1.6;">${escHtml(writeup)}</div>`;
+            }
           }
           for (const task of stepTasks) {
             bodyContent += renderTask(task, "formula");
           }
         }
+
+        // Earlier undone formula steps from prior weeks (grouped by formula)
+        if (earlierUndoneFormulas.length > 0) {
+          bodyContent += renderSectionHeader("Earlier Undone Formula Steps");
+          for (const formulaGroup of earlierUndoneFormulas) {
+            bodyContent += `
+              <div style="margin:16px 0 8px 0;">
+                <div style="font-size:${headingFontSize};font-weight:600;color:#333;margin-bottom:8px;">
+                  ${escHtml(formulaGroup.formulaName)} (${escHtml(formulaGroup.formulaCode)})
+                </div>
+              </div>
+            `;
+            for (const step of formulaGroup.steps) {
+              bodyContent += `
+                <div style="margin:8px 0 6px 8px;">
+                  <div style="font-size:0.9em;font-weight:500;color:#555;margin-bottom:6px;">
+                    Step ${step.stepNumber}: ${escHtml(step.stepDescription)}
+                  </div>
+                </div>
+              `;
+              if (includeWriteups && step.writeup) {
+                bodyContent += `<div style="margin:-4px 0 12px 16px;color:#444;font-size:0.9em;font-style:italic;line-height:1.6;">${escHtml(step.writeup)}</div>`;
+              }
+              for (const task of step.tasks) {
+                bodyContent += renderTask(task, "formula");
+              }
+            }
+          }
+        }
       } else {
-        // Main board formula view — group by formula, then by step
-        const formulaTaskMap = new Map<string, { formula: ConditionFormula; tasks: KanbanTask[] }>();
-        const unassigned: KanbanTask[] = [];
+        // Main board formula view — current week formula (all steps) + earlier undone + additional
+        const currentWeekBp = bps.length > 0 ? bps[0] : null;
+        const currentWeekFormula = currentWeekBp ? bpFormulaMap.get(currentWeekBp.id) : null;
+
+        // Categorize tasks
+        const currentStepTasks: KanbanTask[] = [];
+        const olderUndoneTasks: KanbanTask[] = [];
+        const additionalTasks: KanbanTask[] = [];
 
         for (const task of bpTasks) {
-          if (task.forwardedFromTaskId) continue; // handled separately
-          const f = task.weeklyBpId ? bpFormulaMap.get(task.weeklyBpId) : undefined;
-          if (f && task.formulaStepId) {
-            if (!formulaTaskMap.has(f.id)) formulaTaskMap.set(f.id, { formula: f, tasks: [] });
-            formulaTaskMap.get(f.id)!.tasks.push(task);
-          } else {
-            unassigned.push(task);
+          if (!task.formulaStepId) {
+            additionalTasks.push(task);
+          } else if (currentWeekBp && task.weeklyBpId === currentWeekBp.id) {
+            currentStepTasks.push(task);
+          } else if (task.status !== "complete" && !task.forwardedToTaskId) {
+            olderUndoneTasks.push(task);
           }
         }
 
-        // Sort formulas by displayOrder descending (highest condition first)
-        const sortedFormulas = [...formulaTaskMap.values()].sort(
-          (a, b) => b.formula.displayOrder - a.formula.displayOrder
-        );
-
-        for (const { formula: f, tasks: fTasks } of sortedFormulas) {
-          bodyContent += renderSectionHeader(`${f.name} (${f.code})`);
-          for (const step of f.steps) {
-            const stepTasks = fTasks
+        // 1. Current week's formula — ALL steps with writeups
+        if (currentWeekFormula && currentWeekBp) {
+          bodyContent += renderSectionHeader(`${currentWeekFormula.name} (${currentWeekFormula.code})`);
+          for (const step of currentWeekFormula.steps) {
+            const stepTasks = currentStepTasks
               .filter((t) => t.formulaStepId === step.id)
               .sort((a, b) => {
                 const ap = PRIORITY_ORDER[a.priority || "none"];
@@ -394,7 +515,6 @@ export default function PrintBPModal({ onClose, viewMode, bpId }: PrintBPModalPr
                 if (ap !== bp2) return ap - bp2;
                 return a.order - b.order;
               });
-            if (stepTasks.length === 0) continue;
             bodyContent += `
               <div style="margin:12px 0 8px 0;">
                 <div style="font-size:0.9em;font-weight:500;color:#555;margin-bottom:6px;">
@@ -402,10 +522,10 @@ export default function PrintBPModal({ onClose, viewMode, bpId }: PrintBPModalPr
                 </div>
               </div>
             `;
-            if (includeLatestBPWriteups) {
-              const stepWriteup = latestBPWriteupsByStep.get(step.id);
-              if (stepWriteup) {
-                bodyContent += `<div style="margin:-4px 0 12px 0;color:#444;font-size:0.9em;font-style:italic;line-height:1.6;padding-left:8px;">${escHtml(stepWriteup)}</div>`;
+            if (includeWriteups) {
+              const writeup = currentWeekBp.stepWriteups?.[step.id];
+              if (writeup) {
+                bodyContent += `<div style="margin:-4px 0 12px 0;color:#444;font-size:0.9em;font-style:italic;line-height:1.6;padding-left:8px;">${escHtml(writeup)}</div>`;
               }
             }
             for (const task of stepTasks) {
@@ -414,19 +534,94 @@ export default function PrintBPModal({ onClose, viewMode, bpId }: PrintBPModalPr
           }
         }
 
-        if (unassigned.length > 0) {
+        // 2. Earlier undone formula steps — grouped by formula with full headings
+        if (olderUndoneTasks.length > 0) {
+          const byFormula: Record<string, {
+            formulaName: string;
+            formulaCode: string;
+            formulaDisplayOrder: number;
+            steps: Record<string, {
+              stepNumber: number;
+              stepDescription: string;
+              writeup: string;
+              tasks: KanbanTask[];
+            }>;
+          }> = {};
+
+          for (const task of olderUndoneTasks) {
+            const step = getStepById(task.formulaStepId!);
+            if (!step) continue;
+            const f = getFormulaById(step.formulaId);
+            if (!f) continue;
+            const bp = bps.find((b) => b.id === task.weeklyBpId);
+
+            if (!byFormula[f.id]) {
+              byFormula[f.id] = {
+                formulaName: f.name,
+                formulaCode: f.code,
+                formulaDisplayOrder: f.displayOrder,
+                steps: {},
+              };
+            }
+            if (!byFormula[f.id].steps[task.formulaStepId!]) {
+              byFormula[f.id].steps[task.formulaStepId!] = {
+                stepNumber: step.stepNumber,
+                stepDescription: step.description,
+                writeup: bp?.stepWriteups?.[task.formulaStepId!] || "",
+                tasks: [],
+              };
+            }
+            byFormula[f.id].steps[task.formulaStepId!].tasks.push(task);
+          }
+
+          const sortedFormulas = Object.values(byFormula)
+            .sort((a, b) => b.formulaDisplayOrder - a.formulaDisplayOrder)
+            .map((f) => ({
+              ...f,
+              sortedSteps: Object.values(f.steps).sort((a, b) => a.stepNumber - b.stepNumber),
+            }));
+
+          bodyContent += renderSectionHeader("Earlier Undone Formula Steps");
+          for (const formulaGroup of sortedFormulas) {
+            bodyContent += `
+              <div style="margin:16px 0 8px 0;">
+                <div style="font-size:${headingFontSize};font-weight:600;color:#333;margin-bottom:8px;">
+                  ${escHtml(formulaGroup.formulaName)} (${escHtml(formulaGroup.formulaCode)})
+                </div>
+              </div>
+            `;
+            for (const step of formulaGroup.sortedSteps) {
+              bodyContent += `
+                <div style="margin:8px 0 6px 8px;">
+                  <div style="font-size:0.9em;font-weight:500;color:#555;margin-bottom:6px;">
+                    Step ${step.stepNumber}: ${escHtml(step.stepDescription)}
+                  </div>
+                </div>
+              `;
+              if (includeWriteups && step.writeup) {
+                bodyContent += `<div style="margin:-4px 0 12px 16px;color:#444;font-size:0.9em;font-style:italic;line-height:1.6;">${escHtml(step.writeup)}</div>`;
+              }
+              for (const task of step.tasks) {
+                bodyContent += renderTask(task, "formula");
+              }
+            }
+          }
+        }
+
+        // 3. Additional targets (forwarded first, then new)
+        if (additionalTasks.length > 0) {
           bodyContent += renderSectionHeader("Additional Targets");
-          for (const task of unassigned.sort(sortByPriorityFormula)) {
+          for (const task of additionalTasks.sort(sortAdditionalTargets)) {
             bodyContent += renderTask(task, "formula");
           }
         }
       }
 
-      // Additional targets — tasks without a formulaStepId (includes forwarded tasks not assigned to a step)
+      // Additional targets — tasks without a formulaStepId (forwarded first, then new)
       if (activeBp) {
         const additionalTasks = bpTasks
           .filter((t) => !t.formulaStepId)
-          .sort(sortByPriorityFormula);
+          .sort(sortAdditionalTargets);
         if (additionalTasks.length > 0) {
           bodyContent += renderSectionHeader("Additional Targets");
           for (const task of additionalTasks) {
@@ -536,7 +731,7 @@ export default function PrintBPModal({ onClose, viewMode, bpId }: PrintBPModalPr
   <div class="footer">Battle Plan</div>
 </body>
 </html>`;
-  }, [bpTasks, layoutMode, fontSize, showCompleted, activeBp, formula, displayName, state.dateFormat, isMainBoard, bps, bpFormulaMap, visibility, includeLatestBPWriteups, latestBPWriteupsByStep]);
+  }, [bpTasks, layoutMode, fontSize, showCompleted, activeBp, formula, displayName, state.dateFormat, isMainBoard, bps, bpFormulaMap, visibility, includeWriteups, latestBPWriteupsByStep, earlierUndoneFormulas]);
 
   function handlePrint() {
     const html = buildPrintHTML();
@@ -578,43 +773,103 @@ export default function PrintBPModal({ onClose, viewMode, bpId }: PrintBPModalPr
   // Build formula groups for main board formula preview
   const mainBoardFormulaGroups = useMemo(() => {
     if (!isMainBoard || layoutMode !== "formula") return [];
-    const formulaTaskMap = new Map<string, { formula: ConditionFormula; tasks: KanbanTask[] }>();
-    const unassigned: KanbanTask[] = [];
-    const forwarded: KanbanTask[] = [];
+
+    const currentWeekBp = bps.length > 0 ? bps[0] : null;
+    const currentWeekFormula = currentWeekBp ? bpFormulaMap.get(currentWeekBp.id) : null;
+
+    // Categorize tasks
+    const currentStepTasks: KanbanTask[] = [];
+    const olderUndoneTasks: KanbanTask[] = [];
+    const additionalTasks: KanbanTask[] = [];
 
     for (const task of bpTasks) {
-      if (task.forwardedFromTaskId) { forwarded.push(task); continue; }
-      const f = task.weeklyBpId ? bpFormulaMap.get(task.weeklyBpId) : undefined;
-      if (f && task.formulaStepId) {
-        if (!formulaTaskMap.has(f.id)) formulaTaskMap.set(f.id, { formula: f, tasks: [] });
-        formulaTaskMap.get(f.id)!.tasks.push(task);
-      } else {
-        unassigned.push(task);
+      if (!task.formulaStepId) {
+        additionalTasks.push(task);
+      } else if (currentWeekBp && task.weeklyBpId === currentWeekBp.id) {
+        currentStepTasks.push(task);
+      } else if (task.status !== "complete" && !task.forwardedToTaskId) {
+        olderUndoneTasks.push(task);
       }
     }
 
     const groups: { label: string; tasks: KanbanTask[]; substeps?: { label: string; tasks: KanbanTask[]; writeup?: string }[] }[] = [];
 
-    const sortedFormulas = [...formulaTaskMap.values()].sort(
-      (a, b) => b.formula.displayOrder - a.formula.displayOrder
-    );
-    for (const { formula: f, tasks: fTasks } of sortedFormulas) {
+    // 1. Current week's formula — ALL steps with writeups
+    if (currentWeekFormula && currentWeekBp) {
       const substeps: { label: string; tasks: KanbanTask[]; writeup?: string }[] = [];
-      for (const step of f.steps) {
-        const stepTasks = fTasks.filter((t) => t.formulaStepId === step.id).sort(sortByPriorityFormula);
-        if (stepTasks.length > 0) {
-          const writeup = includeLatestBPWriteups ? latestBPWriteupsByStep.get(step.id) : undefined;
-          substeps.push({ label: `Step ${step.stepNumber}: ${step.description}`, tasks: stepTasks, writeup });
-        }
+      for (const step of currentWeekFormula.steps) {
+        const stepTasks = currentStepTasks.filter((t) => t.formulaStepId === step.id).sort(sortByPriorityFormula);
+        const writeup = includeWriteups ? currentWeekBp.stepWriteups?.[step.id] : undefined;
+        substeps.push({ label: `Step ${step.stepNumber}: ${step.description}`, tasks: stepTasks, writeup });
       }
-      if (substeps.length > 0) {
-        groups.push({ label: `${f.name} (${f.code})`, tasks: [], substeps });
+      groups.push({ label: `${currentWeekFormula.name} (${currentWeekFormula.code})`, tasks: [], substeps });
+    }
+
+    // 2. Earlier undone formula steps — grouped by formula with full headings
+    if (olderUndoneTasks.length > 0) {
+      const byFormula: Record<string, {
+        formulaName: string;
+        formulaCode: string;
+        formulaDisplayOrder: number;
+        steps: Record<string, {
+          stepNumber: number;
+          stepDescription: string;
+          writeup: string;
+          tasks: KanbanTask[];
+        }>;
+      }> = {};
+
+      for (const task of olderUndoneTasks) {
+        const step = getStepById(task.formulaStepId!);
+        if (!step) continue;
+        const f = getFormulaById(step.formulaId);
+        if (!f) continue;
+        const bp = bps.find((b) => b.id === task.weeklyBpId);
+
+        if (!byFormula[f.id]) {
+          byFormula[f.id] = {
+            formulaName: f.name,
+            formulaCode: f.code,
+            formulaDisplayOrder: f.displayOrder,
+            steps: {},
+          };
+        }
+        if (!byFormula[f.id].steps[task.formulaStepId!]) {
+          byFormula[f.id].steps[task.formulaStepId!] = {
+            stepNumber: step.stepNumber,
+            stepDescription: step.description,
+            writeup: bp?.stepWriteups?.[task.formulaStepId!] || "",
+            tasks: [],
+          };
+        }
+        byFormula[f.id].steps[task.formulaStepId!].tasks.push(task);
+      }
+
+      const sortedFormulas = Object.values(byFormula)
+        .sort((a, b) => b.formulaDisplayOrder - a.formulaDisplayOrder)
+        .map((f) => ({
+          formulaName: f.formulaName,
+          formulaCode: f.formulaCode,
+          sortedSteps: Object.values(f.steps).sort((a, b) => a.stepNumber - b.stepNumber),
+        }));
+
+      for (const formulaGroup of sortedFormulas) {
+        const substeps: { label: string; tasks: KanbanTask[]; writeup?: string }[] = formulaGroup.sortedSteps.map((s) => ({
+          label: `Step ${s.stepNumber}: ${s.stepDescription}`,
+          tasks: s.tasks,
+          writeup: includeWriteups && s.writeup ? s.writeup : undefined,
+        }));
+        groups.push({ label: `Earlier Undone: ${formulaGroup.formulaName} (${formulaGroup.formulaCode})`, tasks: [], substeps });
       }
     }
-    if (unassigned.length > 0) groups.push({ label: "Additional Targets", tasks: unassigned.sort(sortByPriorityFormula) });
-    if (forwarded.length > 0) groups.push({ label: "From Previous Weeks", tasks: forwarded.sort(sortByPriorityFormula) });
+
+    // 3. Additional targets (forwarded first, then new)
+    if (additionalTasks.length > 0) {
+      groups.push({ label: "Additional Targets", tasks: additionalTasks.sort(sortAdditionalTargets) });
+    }
+
     return groups;
-  }, [isMainBoard, layoutMode, bpTasks, bpFormulaMap, includeLatestBPWriteups, latestBPWriteupsByStep]);
+  }, [isMainBoard, layoutMode, bpTasks, bps, bpFormulaMap, includeWriteups]);
 
   // Build structured sections for export (reuses same grouping as print HTML)
   const buildExportSections = useCallback(() => {
@@ -676,9 +931,23 @@ export default function PrintBPModal({ onClose, viewMode, bpId }: PrintBPModalPr
       if (activeBp && formula) {
         for (const step of formula.steps) {
           const stepTasks = bpTasks.filter((t) => t.formulaStepId === step.id).sort(sortByPriorityFormula);
-          sections.push({ heading: `Step ${step.stepNumber}: ${step.description}`, tasks: stepTasks.map((t) => mapTask(t, "formula")), writeup: activeBp.stepWriteups?.[step.id] || undefined });
+          sections.push({ heading: `Step ${step.stepNumber}: ${step.description}`, tasks: stepTasks.map((t) => mapTask(t, "formula")), writeup: includeWriteups ? (activeBp.stepWriteups?.[step.id] || undefined) : undefined });
         }
-        const additionalTasks = bpTasks.filter((t) => !t.formulaStepId).sort(sortByPriorityFormula);
+        // Earlier undone formula steps from prior weeks (grouped by formula)
+        if (earlierUndoneFormulas.length > 0) {
+          for (const formulaGroup of earlierUndoneFormulas) {
+            // Add a section heading for each earlier formula
+            sections.push({ heading: `Earlier Undone: ${formulaGroup.formulaName} (${formulaGroup.formulaCode})`, tasks: [] });
+            for (const step of formulaGroup.steps) {
+              sections.push({
+                heading: `Step ${step.stepNumber}: ${step.stepDescription}`,
+                tasks: step.tasks.map((t) => mapTask(t, "formula")),
+                writeup: includeWriteups && step.writeup ? step.writeup : undefined,
+              });
+            }
+          }
+        }
+        const additionalTasks = bpTasks.filter((t) => !t.formulaStepId).sort(sortAdditionalTargets);
         if (additionalTasks.length > 0) sections.push({ heading: "Additional Targets", tasks: additionalTasks.map((t) => mapTask(t, "formula")) });
       } else {
         // Main board formula view
@@ -703,7 +972,7 @@ export default function PrintBPModal({ onClose, viewMode, bpId }: PrintBPModalPr
     }
 
     return sections;
-  }, [bpTasks, layoutMode, showCompleted, activeBp, formula, bps, mainBoardFormulaGroups, visibility]);
+  }, [bpTasks, layoutMode, showCompleted, activeBp, formula, bps, mainBoardFormulaGroups, visibility, includeWriteups, earlierUndoneFormulas]);
 
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
@@ -866,13 +1135,13 @@ export default function PrintBPModal({ onClose, viewMode, bpId }: PrintBPModalPr
             </span>
           </label>
 
-          {/* Include BP writeups — only on main board formula view */}
-          {isMainBoard && layoutMode === "formula" && (
+          {/* Include BP writeups */}
+          {layoutMode === "formula" && (
             <label className="flex items-center gap-1.5 cursor-pointer">
               <input
                 type="checkbox"
-                checked={includeLatestBPWriteups}
-                onChange={(e) => setIncludeLatestBPWriteups(e.target.checked)}
+                checked={includeWriteups}
+                onChange={(e) => setIncludeWriteups(e.target.checked)}
                 className="rounded border-stone-300 dark:border-stone-600"
               />
               <span className="text-xs text-stone-500 dark:text-stone-400">
@@ -967,7 +1236,7 @@ export default function PrintBPModal({ onClose, viewMode, bpId }: PrintBPModalPr
               isMainBoard ? (
                 <MainBoardFormulaPreview groups={mainBoardFormulaGroups} vis={visibility} />
               ) : (
-                <FormulaStepPreview tasks={bpTasks} formula={formula} stepWriteups={activeBp?.stepWriteups} vis={visibility} />
+                <FormulaStepPreview tasks={bpTasks} formula={formula} stepWriteups={activeBp?.stepWriteups} vis={visibility} includeWriteups={includeWriteups} earlierUndoneFormulas={earlierUndoneFormulas} showCompleted={showCompleted} />
               )
             ) : (
               <PriorityPreview tasks={bpTasks} bps={bps} vis={visibility} />
@@ -1084,33 +1353,36 @@ function FormulaStepPreview({
   formula,
   stepWriteups,
   vis,
+  includeWriteups,
+  earlierUndoneFormulas,
+  showCompleted,
 }: {
   tasks: KanbanTask[];
   formula: ReturnType<typeof getFormulaById>;
   stepWriteups?: Record<string, string>;
   vis: PrintVisibility;
+  includeWriteups: boolean;
+  earlierUndoneFormulas: { formulaName: string; formulaCode: string; formulaDisplayOrder: number; steps: { stepNumber: number; stepDescription: string; writeup: string; tasks: KanbanTask[] }[] }[];
+  showCompleted: boolean;
 }) {
   const stepGroups: { label: string; tasks: KanbanTask[]; writeup?: string }[] = [];
 
   if (formula) {
     for (const step of formula.steps) {
       const stepTasks = tasks.filter(
-        (t) => t.formulaStepId === step.id && t.status !== "complete"
+        (t) => t.formulaStepId === step.id && (showCompleted || t.status !== "complete")
       );
       stepGroups.push({
         label: `Step ${step.stepNumber}: ${step.description}`,
         tasks: stepTasks,
-        writeup: stepWriteups?.[step.id],
+        writeup: includeWriteups ? stepWriteups?.[step.id] : undefined,
       });
     }
   }
 
-  const additional = tasks.filter(
-    (t) => !t.formulaStepId && t.status !== "complete"
-  );
-  if (additional.length > 0) {
-    stepGroups.push({ label: "Additional Targets", tasks: additional });
-  }
+  const additional = tasks
+    .filter((t) => !t.formulaStepId && (showCompleted || t.status !== "complete"))
+    .sort(sortAdditionalTargets);
 
   return (
     <div className="space-y-4">
@@ -1131,6 +1403,57 @@ function FormulaStepPreview({
           </div>
         </div>
       ))}
+
+      {/* Earlier undone formula steps from prior weeks — grouped by formula */}
+      {earlierUndoneFormulas.length > 0 && (
+        <div>
+          <div className="font-semibold uppercase tracking-widest text-stone-500 pb-1.5 mb-2 mt-4" style={{ fontSize: "0.75em" }}>
+            Earlier Undone Formula Steps
+          </div>
+          <div className="space-y-4">
+            {earlierUndoneFormulas.map((formulaGroup, i) => (
+              <div key={i}>
+                <div className="font-semibold text-stone-500 mb-2" style={{ fontSize: "0.9em" }}>
+                  {formulaGroup.formulaName} ({formulaGroup.formulaCode})
+                </div>
+                <div className="space-y-3 ml-1">
+                  {formulaGroup.steps.map((step, j) => (
+                    <div key={j}>
+                      <div className="text-stone-500 font-medium mb-1.5" style={{ fontSize: "0.85em" }}>
+                        Step {step.stepNumber}: {step.stepDescription}
+                      </div>
+                      {includeWriteups && step.writeup && (
+                        <p className="text-stone-400 italic mb-1.5 ml-1" style={{ fontSize: "0.8em" }}>
+                          {step.writeup}
+                        </p>
+                      )}
+                      <div className="space-y-2">
+                        {step.tasks.map((task) => (
+                          <PreviewTask key={task.id} task={task} layout="formula" vis={vis} />
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Additional targets */}
+      {additional.length > 0 && (
+        <div>
+          <div className="font-semibold uppercase tracking-widest text-stone-500 pb-1.5 mb-2" style={{ fontSize: "0.75em" }}>
+            Additional Targets
+          </div>
+          <div className="space-y-2">
+            {additional.map((task) => (
+              <PreviewTask key={task.id} task={task} layout="formula" vis={vis} />
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
