@@ -18,7 +18,7 @@ import {
 import { sortableKeyboardCoordinates } from "@dnd-kit/sortable";
 import { useAppContext } from "@/context/AppContext";
 import type { KanbanTask, ColumnStatus, Priority } from "@/lib/types";
-import { getFormulaSortKey } from "@/lib/conditionFormulas";
+import { getFormulaSortKey, getFormulaById } from "@/lib/conditionFormulas";
 import KanbanColumn from "./KanbanColumn";
 import KanbanCard from "./KanbanCard";
 import KanbanCardModal from "./KanbanCardModal";
@@ -101,9 +101,53 @@ export default function KanbanBoard() {
     return m;
   }, [state.weeklyBattlePlans]);
 
+  // Build BP lookup for formula grouping (bpId → formula base sort key)
+  // Additional targets get their BP's formula displayOrder * 100 - 99
+  // so they sort after all formula steps but before the next formula
+  const bpFormulaSortKeyLookup = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const bp of state.weeklyBattlePlans) {
+      const formula = getFormulaById(bp.formulaId);
+      if (formula) {
+        m.set(bp.id, formula.displayOrder * 100 - 99);
+      }
+    }
+    return m;
+  }, [state.weeklyBattlePlans]);
+
   function getWeekStartTime(task: KanbanTask): number {
-    if (!task.weeklyBpId) return 0;
-    return bpWeekStartLookup.get(task.weeklyBpId) || 0;
+    if (!task.weeklyBpId) return Number.MAX_SAFE_INTEGER;
+    return bpWeekStartLookup.get(task.weeklyBpId) || Number.MAX_SAFE_INTEGER;
+  }
+
+  // Build BP → formulaId lookup for reorder group keying
+  const bpFormulaIdLookup = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const bp of state.weeklyBattlePlans) {
+      m.set(bp.id, bp.formulaId);
+    }
+    return m;
+  }, [state.weeklyBattlePlans]);
+
+  // Get sort key for any task in formula sort mode:
+  // - Formula step tasks: use step-level key (displayOrder * 100 - stepNumber)
+  // - Additional targets (BP but no step): use BP's formula base key (displayOrder * 100 - 99)
+  // - Floating tasks (no BP): -1 (sort last)
+  function getTaskFormulaSortKey(task: KanbanTask): number {
+    if (task.formulaStepId) return getFormulaSortKey(task.formulaStepId);
+    if (task.weeklyBpId) return bpFormulaSortKeyLookup.get(task.weeklyBpId) ?? -1;
+    return -1;
+  }
+
+  // Reorder group key: tasks can only be reordered within the same group
+  // in formula-based sort modes
+  function getReorderGroupKey(task: KanbanTask): string {
+    if (task.formulaStepId) return `step:${task.formulaStepId}`;
+    if (task.weeklyBpId) {
+      const formulaId = bpFormulaIdLookup.get(task.weeklyBpId);
+      return formulaId ? `additional:${formulaId}` : "floating";
+    }
+    return "floating";
   }
 
   function getTasksForColumn(status: ColumnStatus) {
@@ -168,11 +212,16 @@ export default function KanbanBoard() {
     }
 
     if (sortMode === "formula") {
-      // Formula mode: sort by condition formula step order (higher = earlier condition)
+      // Formula mode: sort by condition formula / step order (higher = earlier condition)
+      // Additional targets group under their BP's formula section
       return columnTasks.sort((a, b) => {
-        const aKey = a.formulaStepId ? getFormulaSortKey(a.formulaStepId) : -1;
-        const bKey = b.formulaStepId ? getFormulaSortKey(b.formulaStepId) : -1;
+        const aKey = getTaskFormulaSortKey(a);
+        const bKey = getTaskFormulaSortKey(b);
         if (aKey !== bKey) return bKey - aKey; // Higher key sorts first
+        // Within same sort key, formula-step tasks before additional targets
+        const aIsStep = a.formulaStepId ? 1 : 0;
+        const bIsStep = b.formulaStepId ? 1 : 0;
+        if (aIsStep !== bIsStep) return bIsStep - aIsStep;
         // Chronological tiebreaker: earlier weeks first (main board only)
         if (!state.activeWeeklyBpId) {
           const aWeek = getWeekStartTime(a);
@@ -184,23 +233,28 @@ export default function KanbanBoard() {
     }
 
     // Default: priority-formula mode
-    // Sort by priority first, then by formula step, then by order
+    // Formula step tasks: sort by formula step (no priority)
+    // Additional targets & floating tasks: sort by priority, then chronological
     return columnTasks.sort((a, b) => {
-      const aPriority = PRIORITY_ORDER[a.priority || "none"];
-      const bPriority = PRIORITY_ORDER[b.priority || "none"];
-      if (aPriority !== bPriority) return aPriority - bPriority;
-
-      const aKey = a.formulaStepId ? getFormulaSortKey(a.formulaStepId) : -1;
-      const bKey = b.formulaStepId ? getFormulaSortKey(b.formulaStepId) : -1;
+      const aKey = getTaskFormulaSortKey(a);
+      const bKey = getTaskFormulaSortKey(b);
       if (aKey !== bKey) return bKey - aKey;
-
+      // Within same sort key, formula-step tasks before additional targets
+      const aIsStep = a.formulaStepId ? 1 : 0;
+      const bIsStep = b.formulaStepId ? 1 : 0;
+      if (aIsStep !== bIsStep) return bIsStep - aIsStep;
+      // Priority tiebreaker only for additional targets (no formulaStepId)
+      if (!a.formulaStepId && !b.formulaStepId) {
+        const aPriority = PRIORITY_ORDER[a.priority || "none"];
+        const bPriority = PRIORITY_ORDER[b.priority || "none"];
+        if (aPriority !== bPriority) return aPriority - bPriority;
+      }
       // Chronological tiebreaker: earlier weeks first (main board only)
       if (!state.activeWeeklyBpId) {
         const aWeek = getWeekStartTime(a);
         const bWeek = getWeekStartTime(b);
         if (aWeek !== bWeek) return aWeek - bWeek;
       }
-
       return a.order - b.order;
     });
   }
@@ -273,7 +327,8 @@ export default function KanbanBoard() {
     if (activeId === overId) return;
 
     // Use ref for fresh state
-    const currentTasks = stateRef.current.tasks;
+    const currentState = stateRef.current;
+    const currentTasks = currentState.tasks;
     const activeT = currentTasks.find((t) => t.id === activeId);
     const overT = currentTasks.find((t) => t.id === overId);
 
@@ -281,6 +336,14 @@ export default function KanbanBoard() {
 
     // Within same column reorder
     if (overT && activeT.status === overT.status) {
+      // In formula-based sort modes, only allow reorder within the same group
+      const { sortMode } = currentState;
+      if (sortMode === "formula" || sortMode === "priority-formula") {
+        const activeGroup = getReorderGroupKey(activeT);
+        const overGroup = getReorderGroupKey(overT);
+        if (activeGroup !== overGroup) return; // Different groups — abort
+      }
+
       const columnTasks = currentTasks
         .filter((t) => t.status === activeT.status)
         .sort((a, b) => a.order - b.order);
@@ -329,7 +392,7 @@ export default function KanbanBoard() {
           onDragOver={handleDragOver}
           onDragEnd={handleDragEnd}
         >
-          <div className={`grid ${gridClass} gap-4 h-full transition-all duration-200`}>
+          <div className={`grid ${gridClass} gap-4 min-h-full transition-all duration-200`}>
             {visibleColumns.map((colStatus) => (
               <KanbanColumn
                 key={colStatus}
